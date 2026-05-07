@@ -15,6 +15,7 @@ export function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   const author = makeUser({ id: "author-1", email: "author@example.com", name: "Author" });
   return {
     id: "ticket-1",
+    ticket_number: 1,
     title: "Ticket title",
     description: "Ticket description",
     status: "open",

@@ -84,6 +84,7 @@ export interface Attachment {
   mime_type: string;
   created_at: string;
   download_url: string | null;
+  use_for_rag?: boolean;
 }
 
 // ─── Notification ────────────────────────────────────────────────────────────

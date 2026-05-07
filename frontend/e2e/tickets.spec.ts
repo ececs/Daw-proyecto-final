@@ -27,5 +27,18 @@ test.describe('Ticket Lifecycle (CRUD & Kanban)', () => {
     const ticketRow = page.locator(`tr:has-text("${uniqueTitle}")`);
     await expect(ticketRow).toBeVisible({ timeout: 10000 });
     await expect(ticketRow.locator('span:has-text("High")')).toBeVisible();
+
+    // Clean up: delete the newly created test ticket
+    await ticketRow.hover();
+    const trashButton = ticketRow.locator('button[aria-label="Delete ticket"]');
+    await trashButton.click();
+
+    const confirmButton = page.locator('button:has-text("Delete ticket")');
+    await expect(confirmButton).toBeVisible();
+    await confirmButton.click();
+
+    // Verify it is successfully deleted from the table
+    await expect(ticketRow).not.toBeVisible({ timeout: 10000 });
   });
 });
+

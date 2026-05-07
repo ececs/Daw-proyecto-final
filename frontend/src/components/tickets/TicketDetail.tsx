@@ -30,6 +30,7 @@ import { STATUS_LABELS, PRIORITY_CONFIG, timeAgo, formatDateTime, formatFileSize
 import { useUsers } from "@/hooks/useUsers";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { isRagEligible } from "@/lib/attachmentUtils";
 import useNotificationStore from "@/stores/notificationStore";
 import useAuthStore from "@/stores/authStore";
 
@@ -95,6 +96,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
   const [extractedContent, setExtractedContent] = useState<string | null>(null);
   const [isRefreshingWeb, setIsRefreshingWeb] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmDeleteAttachmentId, setConfirmDeleteAttachmentId] = useState<string | null>(null);
 
 
   const refreshWebContext = async () => {
@@ -272,11 +274,42 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
     }
   };
 
-  const deleteAttachment = async (attId: string) => {
-    if (!confirm("Delete this attachment?")) return;
+  const deleteAttachment = (attId: string) => {
+    setConfirmDeleteAttachmentId(attId);
+  };
+
+  const handleConfirmDeleteAttachment = async () => {
+    if (!confirmDeleteAttachmentId) return;
+    const attId = confirmDeleteAttachmentId;
+    setConfirmDeleteAttachmentId(null);
     await api.delete(`/tickets/${ticketId}/attachments/${attId}`);
     setAttachments((prev) => prev.filter((a) => a.id !== attId));
   };
+
+  const toggleAttachmentRag = async (attId: string, currentStatus: boolean) => {
+    try {
+      const newStatus = !currentStatus;
+      const res = await api.patch<Attachment>(
+        `/tickets/${ticketId}/attachments/${attId}?use_for_rag=${newStatus}`
+      );
+      setAttachments((prev) =>
+        prev.map((a) => (a.id === attId ? { ...a, use_for_rag: res.data.use_for_rag } : a))
+      );
+      toast({
+        title: newStatus ? "Enabled for RAG" : "Disabled from RAG",
+        description: newStatus
+          ? "The AI assistant will now use this document as context."
+          : "The AI assistant will no longer use this document as context.",
+      });
+    } catch (err) {
+      toast({
+        title: "Failed to update RAG",
+        description: "Could not update the attachment status.",
+        variant: "destructive",
+      });
+    }
+  };
+
 
   // ── AI Diagnosis ─────────────────────────────────────────────────────────
   
@@ -316,7 +349,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
       }
     } catch (err: unknown) {
       console.error("AI Diagnosis failed", err);
-      setAiDiagnosis("*(Error: No se pudo conectar con el servicio de IA para el diagnóstico en tiempo real)*");
+      setAiDiagnosis("*(Error: Could not connect to the AI service for real-time diagnosis)*");
     } finally {
       setIsDiagnosing(false);
     }
@@ -705,33 +738,73 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
             ) : (
               <ul className="space-y-2">
                 {attachments.map((att) => (
-                  <li key={att.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 group">
-                    <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-slate-700 truncate">{att.filename}</p>
-                      <p className="text-xs text-slate-400">{formatFileSize(att.size_bytes)}</p>
+                  <li key={att.id} className={`flex items-center justify-between gap-3 p-2.5 rounded-lg border transition-all duration-200 ${
+                    att.use_for_rag 
+                      ? "bg-teal-50/40 border-teal-200/60 shadow-sm" 
+                      : "border-slate-100 hover:bg-slate-50 hover:border-slate-200"
+                  } group`}>
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className={`p-2 rounded-lg shrink-0 ${
+                        att.use_for_rag ? "bg-teal-100/80 text-teal-600 animate-pulse" : "bg-slate-100 text-slate-500"
+                      }`}>
+                        <Paperclip className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className={`text-sm font-medium truncate ${
+                            att.use_for_rag ? "text-teal-900 font-semibold" : "text-slate-700"
+                          }`}>{att.filename}</p>
+                          {att.use_for_rag && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-teal-100 text-teal-800 border border-teal-200">
+                              <Sparkles className="w-2.5 h-2.5 text-teal-600" /> RAG Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400">{formatFileSize(att.size_bytes)}</p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {att.download_url && (
-                        <a
-                          href={att.download_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`Descargar ${att.filename}`}
-                          className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
-                          title="Download"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </a>
+                    
+                    <div className="flex items-center gap-3 shrink-0">
+                      {/* Checkbox for RAG — only for indexable types */}
+                      {isRagEligible(att.mime_type) && (
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={!!att.use_for_rag}
+                            onChange={() => toggleAttachmentRag(att.id, !!att.use_for_rag)}
+                            className="w-4 h-4 rounded text-teal-600 border-slate-300 focus:ring-teal-500 cursor-pointer accent-teal-600 transition-colors"
+                          />
+                          <span className={`text-xs font-medium transition-colors ${
+                            att.use_for_rag ? "text-teal-700 font-semibold" : "text-slate-400 hover:text-slate-600"
+                          }`}>
+                            Use for RAG
+                          </span>
+                        </label>
                       )}
-                      <button
-                        onClick={() => deleteAttachment(att.id)}
-                        aria-label={`Eliminar ${att.filename}`}
-                        className="p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+
+                      {/* Download and Delete actions */}
+                      <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                        {att.download_url && (
+                          <a
+                            href={att.download_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Download ${att.filename}`}
+                            className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                            title="Download"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <button
+                          onClick={() => deleteAttachment(att.id)}
+                          aria-label={`Delete ${att.filename}`}
+                          className="p-1.5 rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </li>
                 ))}
@@ -903,6 +976,14 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
         confirmLabel="Delete ticket"
         onConfirm={handleDeleteTicket}
         onCancel={() => setConfirmDeleteOpen(false)}
+      />
+      <ConfirmDialog
+        open={confirmDeleteAttachmentId !== null}
+        title="Delete attachment"
+        description="The file will be permanently deleted. This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={handleConfirmDeleteAttachment}
+        onCancel={() => setConfirmDeleteAttachmentId(null)}
       />
     </div>
   );

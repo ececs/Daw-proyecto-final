@@ -110,6 +110,96 @@ async def ingest_url(db: AsyncSession, url: str) -> dict:
     return IngestResponse(url=url, chunks_created=len(rows))
 
 
+def _extract_text(content: bytes, mime_type: str) -> str:
+    """
+    Extract plain text from file bytes based on MIME type.
+
+    Supports the three RAG-eligible types:
+      - application/pdf            → pypdf page-by-page extraction
+      - text/plain                 → direct UTF-8 decode
+      - application/vnd...docx    → python-docx paragraph join
+
+    Raises ValueError for unsupported types so callers can surface a clean error.
+    """
+    if mime_type == "application/pdf":
+        import io
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(content))
+        return "\n\n".join(
+            page.extract_text() or "" for page in reader.pages
+        ).strip()
+
+    if mime_type == "text/plain":
+        return content.decode("utf-8", errors="replace").strip()
+
+    if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        import io
+        import docx
+        doc = docx.Document(io.BytesIO(content))
+        return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+    raise ValueError(f"Unsupported MIME type for text extraction: {mime_type}")
+
+
+async def ingest_attachment(
+    db: AsyncSession,
+    attachment_id: str,
+    ticket_id: str,
+    content: bytes,
+    mime_type: str,
+) -> dict:
+    """
+    Extract text from an attachment, chunk, embed, and persist to knowledge_chunks.
+
+    Uses a synthetic url of ``attachment:<attachment_id>`` as the stable key so
+    existing chunks can be replaced idempotently on re-toggle.
+
+    Returns:
+        {"attachment_id": str, "chunks_created": int}
+
+    Raises:
+        ValueError if text extraction fails or yields no content.
+    """
+    text = _extract_text(content, mime_type)
+    if not text:
+        raise ValueError("No text content found in attachment")
+
+    chunks = _chunk_text(text)
+    if not chunks:
+        raise ValueError("No content found after chunking")
+
+    embeddings = await asyncio.gather(
+        *[generate_embedding(c, task_type="RETRIEVAL_DOCUMENT") for c in chunks]
+    )
+
+    synthetic_url = f"attachment:{attachment_id}"
+    # Remove any stale chunks for this attachment (idempotent re-index)
+    await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.url == synthetic_url))
+
+    rows = [
+        KnowledgeChunk(
+            url=synthetic_url,
+            chunk_index=i,
+            content=chunk,
+            embedding=emb,
+            chunk_metadata={"ticket_id": ticket_id, "attachment_id": attachment_id},
+        )
+        for i, (chunk, emb) in enumerate(zip(chunks, embeddings))
+    ]
+    db.add_all(rows)
+    await db.commit()
+
+    logger.info("Ingested %d chunks from attachment %s", len(rows), attachment_id)
+    return {"attachment_id": attachment_id, "chunks_created": len(rows)}
+
+
+async def delete_attachment_chunks(db: AsyncSession, attachment_id: str) -> None:
+    """Remove all knowledge chunks associated with an attachment."""
+    synthetic_url = f"attachment:{attachment_id}"
+    await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.url == synthetic_url))
+    await db.commit()
+
+
 async def search(db: AsyncSession, query: str, k: int = 5, ticket_id: Optional[str] = None) -> list[str]:
     """
     Return the top-k knowledge chunks most relevant to `query`.

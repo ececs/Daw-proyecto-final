@@ -1,4 +1,4 @@
-import { Notification, Ticket, User } from "@/types";
+import { Attachment, Notification, Ticket, User } from "@/types";
 
 export function makeUser(overrides: Partial<User> = {}): User {
   return {
@@ -27,6 +27,21 @@ export function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     updated_at: "2026-05-01T10:00:00.000Z",
     author,
     assignee: null,
+    ...overrides,
+  };
+}
+
+export function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
+  return {
+    id: "attachment-1",
+    ticket_id: "ticket-1",
+    uploader_id: "user-1",
+    filename: "document.pdf",
+    size_bytes: 102400,
+    mime_type: "application/pdf",
+    created_at: "2026-05-01T10:00:00.000Z",
+    download_url: "http://localhost:9000/tickets/ticket-1/document.pdf",
+    use_for_rag: false,
     ...overrides,
   };
 }

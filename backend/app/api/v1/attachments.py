@@ -102,3 +102,27 @@ async def delete_attachment(
         if not exists:
             raise HTTPException(status_code=404, detail="Attachment not found")
         raise HTTPException(status_code=403, detail="You can only delete your own attachments")
+
+
+@router.patch(
+    "/{ticket_id}/attachments/{attachment_id}",
+    response_model=AttachmentOut,
+    summary="Toggle use_for_rag for an attachment",
+)
+async def toggle_attachment_rag(
+    ticket_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    use_for_rag: bool,
+    db: DB,
+    current_user: CurrentUser,
+):
+    """
+    Toggle use_for_rag status of an attachment.
+    """
+    attachment = await attachment_service.update_attachment_rag(
+        db, attachment_id=attachment_id, use_for_rag=use_for_rag
+    )
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return attachment
+

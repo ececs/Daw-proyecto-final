@@ -12,5 +12,6 @@ class AttachmentOut(BaseModel):
     mime_type: str
     created_at: datetime
     download_url: str | None = None
+    use_for_rag: bool = False
 
     model_config = {"from_attributes": True}

@@ -34,6 +34,12 @@
    - 5.6 Autenticación
    - 5.7 Despliegue
 6. [Pruebas y validación](#6-pruebas-y-validación)
+   - 6.1 Pruebas del backend (pytest)
+   - 6.2 Pruebas del frontend (Vitest)
+   - 6.3 Pruebas de tipado y calidad de código
+   - 6.4 Pruebas E2E con Playwright
+   - 6.5 Validación funcional manual
+   - 6.6 Evidencias
 7. [Problemas encontrados y soluciones adoptadas](#7-problemas-encontrados-y-soluciones-adoptadas)
 8. [Resultados finales](#8-resultados-finales)
 9. [Conclusiones](#9-conclusiones)
@@ -563,7 +569,34 @@ npm run lint
 npm run build
 ```
 
-### 6.4 Validación funcional manual
+### 6.4 Pruebas E2E con Playwright
+
+Para cubrir la validación de extremo a extremo — frontend, backend, base de datos y WebSockets en un entorno integrado real — se implementó una suite de pruebas E2E con Playwright, organizada en cinco ficheros de especificación bajo `frontend/e2e/`:
+
+| Fichero | Casos | Descripción |
+|---|---|---|
+| `auth.spec.ts` | 2 | Protección de rutas y login con código demo |
+| `tickets.spec.ts` | 1 | Creación de ticket y aparición en tablero |
+| `comments.spec.ts` | 1 | Publicar comentario y verificar en historial |
+| `websockets.spec.ts` | 1 | Dos contextos paralelos: modificación en ventana A → actualización instantánea en ventana B |
+| `copilot.spec.ts` | 1 | Interacción básica con el asistente IA y respuesta en streaming |
+
+**Casos cubiertos:**
+
+- *Protección de rutas:* acceder a `/board` sin autenticar redirige automáticamente a `/login`.
+- *Login exitoso:* acceso con código demo y persistencia de sesión tras recarga.
+- *Creación de ticket:* el ticket creado aparece en la columna "Por hacer" del Kanban.
+- *Comentarios:* el comentario publicado aparece inmediatamente en la vista de detalle.
+- *WebSockets en tiempo real:* ticket creado en la ventana A es visible en la ventana B sin refrescar.
+- *AI Copilot:* el panel de chat responde con texto en streaming ante una consulta del usuario.
+
+**Ejecución:**
+```bash
+cd frontend
+npx playwright test
+```
+
+### 6.5 Validación funcional manual
 
 Se realizó una validación manual final antes de la entrega cubriendo los siguientes flujos:
 
@@ -586,9 +619,9 @@ Se realizó una validación manual final antes de la entrega cubriendo los sigui
 - Board y panel de chat en dispositivo móvil.
 - Toasts y panel IA sin solapamientos en móvil.
 
-### 6.5 Evidencias
+### 6.6 Evidencias
 
-> *[COMPLETAR: incluir capturas de pantalla de los flujos principales: login, vista lista, vista Kanban, panel de chat IA, diagnóstico IA, notificaciones, adjuntos. Añadir captura de los resultados de pytest y vitest.]*
+> *[COMPLETAR: incluir capturas de pantalla de los flujos principales: login, vista lista, vista Kanban, panel de chat IA, diagnóstico IA, notificaciones, adjuntos. Añadir captura de los resultados de pytest, vitest y playwright.]*
 
 ---
 
@@ -664,7 +697,7 @@ El proyecto se ha completado satisfactoriamente con todas las funcionalidades pl
 - Failover automático Gemini → GPT-4o-mini.
 
 **Calidad y operaciones:**
-- Suite de 43 pruebas frontend (Vitest) y pruebas backend (pytest).
+- Suite de 43 pruebas unitarias frontend (Vitest), pruebas de integración backend (pytest) y 6 pruebas E2E de extremo a extremo (Playwright).
 - Migraciones de base de datos versionadas con Alembic.
 - Despliegue en producción con CI/CD (Vercel + Railway).
 - Documentación API automática (Swagger/OpenAPI).
@@ -702,7 +735,8 @@ Desde el punto de vista técnico, la implementación del agente de IA con Tool C
 ### 9.3 Posibles mejoras y líneas de ampliación futura
 
 **Corto plazo:**
-- **RAG sobre adjuntos de ticket:** Indexar los archivos subidos (PDFs, documentos) como fuente de conocimiento para el diagnóstico IA. La arquitectura está preparada; requiere añadir un pipeline de extracción de texto y generación de embeddings al servicio de adjuntos.
+- **RAG sobre adjuntos de ticket:** Indexar los archivos subidos (PDFs, documentos) como fuente de conocimiento para el diagnóstico IA, permitiendo al operador marcar adjuntos concretos como contexto IA mediante un toggle por adjunto. La arquitectura está preparada; requiere añadir un pipeline de extracción de texto y generación de embeddings al servicio de adjuntos.
+- **Observabilidad ligera del asistente:** Panel de estado operativo del agente sin necesidad de un dashboard completo: proveedor activo, modelo activo, disponibilidad del fallback, último error y contador de acciones IA. Mejora la visibilidad del comportamiento del asistente sin añadir complejidad de infraestructura.
 - **`interrupt/resume` persistente del agente:** Reemplazar la confirmación en frontend por el mecanismo nativo de LangGraph, que permitiría pausar el grafo, esperar confirmación del usuario y reanudar la ejecución desde el mismo punto, incluso tras un reinicio del servidor.
 - **Identificador secuencial de ticket:** Añadir un campo `ticket_number` autoincremental para una referencia más legible (TICK-001, TICK-002...).
 

@@ -18,25 +18,25 @@ MAX_BYTES = settings.MAX_ATTACHMENT_SIZE_MB * 1024 * 1024
 
 
 @router.get(
-    "/{ticket_number}/attachments",
+    "/{ticket_ref}/attachments",
     response_model=List[AttachmentOut],
     summary="List attachments for a ticket",
 )
-async def list_attachments(ticket_number: int, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+async def list_attachments(ticket_ref: str, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return await attachment_service.list_attachments(db, ticket.id)
 
 
 @router.post(
-    "/{ticket_number}/attachments",
+    "/{ticket_ref}/attachments",
     response_model=AttachmentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Upload a file attachment",
 )
 async def upload_attachment(
-    ticket_number: int,
+    ticket_ref: str,
     file: UploadFile,
     db: DB,
     current_user: CurrentUser,
@@ -56,7 +56,7 @@ async def upload_attachment(
             detail=f"File type '{mime_type}' is not allowed",
         )
 
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -83,17 +83,17 @@ async def upload_attachment(
 
 
 @router.delete(
-    "/{ticket_number}/attachments/{attachment_id}",
+    "/{ticket_ref}/attachments/{attachment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete an attachment",
 )
 async def delete_attachment(
-    ticket_number: int,
+    ticket_ref: str,
     attachment_id: uuid.UUID,
     db: DB,
     current_user: CurrentUser,
 ):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -116,12 +116,12 @@ async def delete_attachment(
 
 
 @router.patch(
-    "/{ticket_number}/attachments/{attachment_id}",
+    "/{ticket_ref}/attachments/{attachment_id}",
     response_model=AttachmentOut,
     summary="Toggle use_for_rag for an attachment",
 )
 async def toggle_attachment_rag(
-    ticket_number: int,
+    ticket_ref: str,
     attachment_id: uuid.UUID,
     use_for_rag: bool,
     db: DB,

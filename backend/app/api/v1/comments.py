@@ -1,5 +1,5 @@
 """
-Comment routes — Nested under /api/v1/tickets/{ticket_number}/comments.
+Comment routes — Nested under /api/v1/tickets/{ticket_ref}/comments.
 """
 
 import uuid
@@ -14,30 +14,30 @@ router = APIRouter(prefix="/tickets", tags=["Comments"])
 
 
 @router.get(
-    "/{ticket_number}/comments",
+    "/{ticket_ref}/comments",
     response_model=List[CommentOut],
     summary="List comments on a ticket",
 )
-async def list_comments(ticket_number: int, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+async def list_comments(ticket_ref: str, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return await comment_service.list_comments(db, ticket.id)
 
 
 @router.post(
-    "/{ticket_number}/comments",
+    "/{ticket_ref}/comments",
     response_model=CommentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Add a comment to a ticket",
 )
 async def create_comment(
-    ticket_number: int,
+    ticket_ref: str,
     body: CommentCreate,
     db: DB,
     current_user: CurrentUser,
 ):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     comment = await comment_service.create_comment(
@@ -49,17 +49,17 @@ async def create_comment(
 
 
 @router.delete(
-    "/{ticket_number}/comments/{comment_id}",
+    "/{ticket_ref}/comments/{comment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a comment",
 )
 async def delete_comment(
-    ticket_number: int,
+    ticket_ref: str,
     comment_id: uuid.UUID,
     db: DB,
     current_user: CurrentUser,
 ):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 

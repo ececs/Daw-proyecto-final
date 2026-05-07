@@ -144,22 +144,22 @@ async def create_ticket(body: TicketCreate, db: DB, current_user: CurrentUser):
     return ticket
 
 
-@router.get("/{ticket_number}", response_model=TicketOut, summary="Get a ticket by number")
-async def get_ticket(ticket_number: int, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+@router.get("/{ticket_ref}", response_model=TicketOut, summary="Get a ticket by number")
+async def get_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return TicketOut.model_validate(ticket)
 
 
-@router.patch("/{ticket_number}", response_model=TicketOut, summary="Update a ticket")
+@router.patch("/{ticket_ref}", response_model=TicketOut, summary="Update a ticket")
 async def update_ticket(
-    ticket_number: int,
+    ticket_ref: str,
     body: TicketUpdate,
     db: DB,
     current_user: CurrentUser,
 ):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -175,18 +175,18 @@ async def update_ticket(
     return updated_ticket
 
 
-@router.get("/{ticket_number}/history", summary="Get audit history for a ticket")
-async def get_ticket_history(ticket_number: int, db: DB, current_user: CurrentUser):
+@router.get("/{ticket_ref}/history", summary="Get audit history for a ticket")
+async def get_ticket_history(ticket_ref: str, db: DB, current_user: CurrentUser):
     from app.services import history_service
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return await history_service.get_history(db, ticket.id)
 
 
-@router.delete("/{ticket_number}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a ticket")
-async def delete_ticket(ticket_number: int, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+@router.delete("/{ticket_ref}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a ticket")
+async def delete_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -215,9 +215,9 @@ async def delete_ticket(ticket_number: int, db: DB, current_user: CurrentUser):
     await cache_invalidate_prefix(CACHE_PREFIX)
 
 
-@router.post("/{ticket_number}/deletion-request", summary="Ask the author to delete a ticket")
-async def request_ticket_deletion(ticket_number: int, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+@router.post("/{ticket_ref}/deletion-request", summary="Ask the author to delete a ticket")
+async def request_ticket_deletion(ticket_ref: str, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -238,14 +238,14 @@ async def request_ticket_deletion(ticket_number: int, db: DB, current_user: Curr
 
 from fastapi.responses import StreamingResponse
 
-@router.get("/{ticket_number}/diagnosis")
+@router.get("/{ticket_ref}/diagnosis")
 async def get_diagnosis(
-    ticket_number: int,
+    ticket_ref: str,
     db: DB,
     current_user: CurrentUser,
 ):
     """Generate an AI diagnosis and suggested solution for a ticket (streamed)."""
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return StreamingResponse(
@@ -254,14 +254,14 @@ async def get_diagnosis(
     )
 
 
-@router.get("/{ticket_number}/web-context")
+@router.get("/{ticket_ref}/web-context")
 async def get_ticket_web_context(
-    ticket_number: int,
+    ticket_ref: str,
     db: DB,
     current_user: CurrentUser,
 ):
     """Fetches the latest AI-extracted web context for this ticket."""
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     result = await db.execute(
@@ -274,14 +274,14 @@ async def get_ticket_web_context(
     return {"content": chunk.content if chunk else None}
 
 
-@router.post("/{ticket_number}/web-scrape-refresh")
+@router.post("/{ticket_ref}/web-scrape-refresh")
 async def refresh_ticket_web_scrape(
-    ticket_number: int,
+    ticket_ref: str,
     db: DB,
     current_user: CurrentUser,
 ):
     """Manually triggers a new web scrape for the ticket's URL."""
-    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket or not ticket.client_url:
         raise HTTPException(status_code=400, detail="Ticket has no URL to scrape.")
     asyncio.create_task(scraping_service.scrape_and_index_url(ticket.id, ticket.client_url))

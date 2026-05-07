@@ -127,6 +127,29 @@ async def get_ticket_by_number(db: AsyncSession, number: int) -> Optional[Ticket
     return result.scalar_one_or_none()
 
 
+async def resolve_ticket(db: AsyncSession, ref: str) -> Optional[Ticket]:
+    """
+    Resolve a ticket by number (new format) or UUID (legacy format).
+    Allows both /tickets/42 and /tickets/<uuid> to work during transition.
+    """
+    _opts = [
+        selectinload(Ticket.author),    # type: ignore[attr-defined]
+        selectinload(Ticket.assignee),  # type: ignore[attr-defined]
+    ]
+    try:
+        number = int(ref)
+        result = await db.execute(select(Ticket).options(*_opts).where(Ticket.ticket_number == number))
+        return result.scalar_one_or_none()
+    except ValueError:
+        pass
+    try:
+        uid = uuid.UUID(ref)
+        result = await db.execute(select(Ticket).options(*_opts).where(Ticket.id == uid))
+        return result.scalar_one_or_none()
+    except ValueError:
+        return None
+
+
 async def create_ticket(
     db: AsyncSession,
     title: str,

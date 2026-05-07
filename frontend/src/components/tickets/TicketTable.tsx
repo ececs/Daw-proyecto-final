@@ -302,7 +302,7 @@ export function TicketTable({
               tickets.map((ticket) => (
                 <tr
                   key={ticket.id}
-                  onClick={() => router.push(`/tickets/${ticket.id}`)}
+                  onClick={() => router.push(`/tickets/${ticket.ticket_number}`)}
                   className={`hover:bg-slate-50 cursor-pointer transition-colors group ${
                     selectedTicketIds.includes(ticket.id) ? "bg-blue-50/50" : ""
                   }`}
@@ -326,7 +326,7 @@ export function TicketTable({
                   </td>
                   {/* Ticket ref */}
                   <td className="px-4 py-3 whitespace-nowrap text-xs font-mono text-slate-400">
-                    #{ticket.id.slice(0, 6)}
+                    #{ticket.ticket_number}
                   </td>
                   {/* Title */}
                   <td className="px-4 py-3">
@@ -378,7 +378,7 @@ export function TicketTable({
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
-                        onClick={(e) => { e.stopPropagation(); router.push(`/tickets/${ticket.id}`); }}
+                        onClick={(e) => { e.stopPropagation(); router.push(`/tickets/${ticket.ticket_number}`); }}
                         aria-label="Open ticket"
                         className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
                         title="Open ticket"

@@ -33,6 +33,7 @@ class TicketUpdate(BaseModel):
 
 class TicketOut(BaseModel):
     id: uuid.UUID
+    ticket_number: int
     title: str
     description: str | None
     status: TicketStatus

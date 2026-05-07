@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DB
 from app.schemas.attachment import AttachmentOut
-from app.services import attachment_service, notification_service
+from app.services import attachment_service, notification_service, ticket_service
 from app.schemas.websocket import WSMessageType
 
 router = APIRouter(prefix="/tickets", tags=["Attachments"])
@@ -18,42 +18,37 @@ MAX_BYTES = settings.MAX_ATTACHMENT_SIZE_MB * 1024 * 1024
 
 
 @router.get(
-    "/{ticket_id}/attachments",
+    "/{ticket_number}/attachments",
     response_model=List[AttachmentOut],
     summary="List attachments for a ticket",
 )
-async def list_attachments(ticket_id: uuid.UUID, db: DB, current_user: CurrentUser):
-    """
-    Return all attachments for a ticket, with fresh presigned download URLs.
-    """
-    return await attachment_service.list_attachments(db, ticket_id)
+async def list_attachments(ticket_number: int, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return await attachment_service.list_attachments(db, ticket.id)
 
 
 @router.post(
-    "/{ticket_id}/attachments",
+    "/{ticket_number}/attachments",
     response_model=AttachmentOut,
     status_code=status.HTTP_201_CREATED,
     summary="Upload a file attachment",
 )
 async def upload_attachment(
-    ticket_id: uuid.UUID,
+    ticket_number: int,
     file: UploadFile,
     db: DB,
     current_user: CurrentUser,
 ):
-    """
-    Upload a file to the ticket.
-    """
     content = await file.read()
 
-    # Size validation
     if len(content) > MAX_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"File exceeds the {settings.MAX_ATTACHMENT_SIZE_MB}MB limit",
         )
 
-    # MIME validation
     mime_type = file.content_type or "application/octet-stream"
     if mime_type not in settings.ALLOWED_MIME_TYPES:
         raise HTTPException(
@@ -61,11 +56,15 @@ async def upload_attachment(
             detail=f"File type '{mime_type}' is not allowed",
         )
 
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
     filename = file.filename or f"attachment_{uuid.uuid4()}"
 
     attachment = await attachment_service.create_attachment(
         db,
-        ticket_id=ticket_id,
+        ticket_id=ticket.id,
         uploader_id=current_user.id,
         filename=filename,
         content=content,
@@ -77,31 +76,31 @@ async def upload_attachment(
 
     await notification_service.broadcast_global_event(
         type=WSMessageType.TICKET_UPDATED,
-        data={"id": str(ticket_id)},
+        data={"id": str(ticket.id), "ticket_number": ticket.ticket_number},
         db=db,
     )
     return attachment
 
 
 @router.delete(
-    "/{ticket_id}/attachments/{attachment_id}",
+    "/{ticket_number}/attachments/{attachment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete an attachment",
 )
 async def delete_attachment(
-    ticket_id: uuid.UUID,
+    ticket_number: int,
     attachment_id: uuid.UUID,
     db: DB,
     current_user: CurrentUser,
 ):
-    """
-    Delete an attachment. Only the original uploader can delete it.
-    """
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
     success = await attachment_service.delete_attachment(
         db, attachment_id=attachment_id, actor_id=current_user.id
     )
     if not success:
-        # Check if it's 404 or 403
         from sqlalchemy import select
         from app.models.attachment import Attachment
         exists = (await db.execute(select(Attachment).where(Attachment.id == attachment_id))).scalar_one_or_none()
@@ -111,30 +110,26 @@ async def delete_attachment(
 
     await notification_service.broadcast_global_event(
         type=WSMessageType.TICKET_UPDATED,
-        data={"id": str(ticket_id)},
+        data={"id": str(ticket.id), "ticket_number": ticket.ticket_number},
         db=db,
     )
 
 
 @router.patch(
-    "/{ticket_id}/attachments/{attachment_id}",
+    "/{ticket_number}/attachments/{attachment_id}",
     response_model=AttachmentOut,
     summary="Toggle use_for_rag for an attachment",
 )
 async def toggle_attachment_rag(
-    ticket_id: uuid.UUID,
+    ticket_number: int,
     attachment_id: uuid.UUID,
     use_for_rag: bool,
     db: DB,
     current_user: CurrentUser,
 ):
-    """
-    Toggle use_for_rag status of an attachment.
-    """
     attachment = await attachment_service.update_attachment_rag(
         db, attachment_id=attachment_id, use_for_rag=use_for_rag
     )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
     return attachment
-

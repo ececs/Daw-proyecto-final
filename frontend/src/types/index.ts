@@ -22,6 +22,7 @@ export type TicketPriority = "low" | "medium" | "high" | "critical";
 
 export interface Ticket {
   id: string;
+  ticket_number: number;
   title: string;
   description: string | null;
   status: TicketStatus;

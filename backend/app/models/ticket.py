@@ -22,7 +22,7 @@ import uuid
 import enum
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy import String, Text, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import Integer, String, Text, DateTime, ForeignKey, Enum as SAEnum, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
@@ -71,6 +71,13 @@ class Ticket(Base):
     __tablename__ = "tickets"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    ticket_number: Mapped[int] = mapped_column(
+        Integer,
+        server_default=text("nextval('ticket_number_seq')"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
 

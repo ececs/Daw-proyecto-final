@@ -107,13 +107,26 @@ async def get_ticket(db: AsyncSession, ticket_id: uuid.UUID) -> Optional[TicketO
         .where(Ticket.id == ticket_id)
     )
     ticket = result.scalar_one_or_none()
-    
+
     if not ticket:
         return None
-        
+
     return TicketOut.model_validate(ticket)
-    
-    
+
+
+async def get_ticket_by_number(db: AsyncSession, number: int) -> Optional[Ticket]:
+    """Retrieve the raw Ticket ORM object by its sequential ticket_number."""
+    result = await db.execute(
+        select(Ticket)
+        .options(
+            selectinload(Ticket.author),    # type: ignore[attr-defined]
+            selectinload(Ticket.assignee),  # type: ignore[attr-defined]
+        )
+        .where(Ticket.ticket_number == number)
+    )
+    return result.scalar_one_or_none()
+
+
 async def create_ticket(
     db: AsyncSession,
     title: str,
@@ -155,7 +168,7 @@ async def create_ticket(
     await notification_service.notify_ticket_created(db, ticket=ticket, actor=author)
     await notification_service.broadcast_global_event(
         type=WSMessageType.TICKET_CREATED,
-        data={"id": str(ticket.id), "title": ticket.title},
+        data={"id": str(ticket.id), "ticket_number": ticket.ticket_number, "title": ticket.title},
         db=db
     )
     await db.commit()  # persist notification records created by the service

@@ -74,7 +74,9 @@ export function useWebSocket(token: string | null) {
               break;
 
             case "ticket_created":
-              if (data && data.id) {
+              if (data && data.ticket_number != null) {
+                triggerRefresh(String(data.ticket_number));
+              } else if (data && data.id) {
                 triggerRefresh(String(data.id));
               } else {
                 triggerRefresh("*");
@@ -134,12 +136,13 @@ export function useWebSocket(token: string | null) {
               break;
 
             case "ticket_updated":
-              if (ticket_id) {
+              if (data && data.ticket_number != null) {
+                triggerRefresh(String(data.ticket_number));
+              } else if (ticket_id) {
                 triggerRefresh(String(ticket_id));
               } else if (data && data.id) {
                 triggerRefresh(String(data.id));
               } else {
-                // Global refresh if no specific ticket
                 triggerRefresh("*");
               }
               break;

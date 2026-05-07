@@ -154,7 +154,7 @@ def make_tools(db: AsyncSession, actor: User) -> List:
                     return "No tickets found with the specified filters."
 
                 return "\n".join([
-                    f"  [{t.status.value}] [{t.priority.value}] {t.title} (ID: {t.id})"
+                    f"  [#{t.ticket_number}] [{t.status.value}] [{t.priority.value}] {t.title} (ID: {t.id})"
                     for t in tickets
                 ])
             except Exception as e:

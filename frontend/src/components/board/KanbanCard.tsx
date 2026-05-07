@@ -42,7 +42,7 @@ export function KanbanCard({ ticket, isUpdating = false }: KanbanCardProps) {
 
   const handleClick = () => {
     if (!isDragging) {
-      router.push(`/tickets/${ticket.id}`);
+      router.push(`/tickets/${ticket.ticket_number}`);
     }
   };
 
@@ -70,7 +70,7 @@ export function KanbanCard({ ticket, isUpdating = false }: KanbanCardProps) {
           {priorityCfg.label}
         </span>
         <span className="text-xs text-slate-400 font-mono shrink-0">
-          #{ticket.id.slice(0, 6)}
+          #{ticket.ticket_number}
         </span>
       </div>
 

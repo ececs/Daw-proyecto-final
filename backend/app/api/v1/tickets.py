@@ -144,55 +144,49 @@ async def create_ticket(body: TicketCreate, db: DB, current_user: CurrentUser):
     return ticket
 
 
-@router.get("/{ticket_id}", response_model=TicketOut, summary="Get a ticket by ID")
-async def get_ticket(ticket_id: uuid.UUID, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.get_ticket(db, ticket_id)
+@router.get("/{ticket_number}", response_model=TicketOut, summary="Get a ticket by number")
+async def get_ticket(ticket_number: int, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    
-    return ticket
+    return TicketOut.model_validate(ticket)
 
 
-@router.patch("/{ticket_id}", response_model=TicketOut, summary="Update a ticket")
+@router.patch("/{ticket_number}", response_model=TicketOut, summary="Update a ticket")
 async def update_ticket(
-    ticket_id: uuid.UUID,
+    ticket_number: int,
     body: TicketUpdate,
     db: DB,
     current_user: CurrentUser,
 ):
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-
-    # --- Authorization Check ---
-    # We allow any authenticated user to update the ticket for demo purposes.
-    # (Previously restricted to author or assignee).
 
     update_data = body.model_dump(exclude_unset=True)
     updated_ticket = await ticket_service.update_ticket(
         db=db,
-        ticket_id=ticket_id,
+        ticket_id=ticket.id,
         update_data=update_data,
         actor=current_user,
     )
 
     await cache_invalidate_prefix(CACHE_PREFIX)
-
     return updated_ticket
 
 
-@router.get("/{ticket_id}/history", summary="Get audit history for a ticket")
-async def get_ticket_history(ticket_id: uuid.UUID, db: DB, current_user: CurrentUser):
+@router.get("/{ticket_number}/history", summary="Get audit history for a ticket")
+async def get_ticket_history(ticket_number: int, db: DB, current_user: CurrentUser):
     from app.services import history_service
-    from app.schemas.ticket_history import TicketHistoryOut
-    return await history_service.get_history(db, ticket_id)
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return await history_service.get_history(db, ticket.id)
 
 
-@router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a ticket")
-async def delete_ticket(ticket_id: uuid.UUID, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
+@router.delete("/{ticket_number}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a ticket")
+async def delete_ticket(ticket_number: int, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -202,6 +196,7 @@ async def delete_ticket(ticket_id: uuid.UUID, db: DB, current_user: CurrentUser)
             detail="Solo el autor puede eliminar este ticket."
         )
 
+    ticket_id = ticket.id
     title = ticket.title
 
     await db.delete(ticket)
@@ -210,21 +205,19 @@ async def delete_ticket(ticket_id: uuid.UUID, db: DB, current_user: CurrentUser)
     # Notify after commit so the ticket_id FK is already gone
     await notification_service.notify_ticket_deleted(db, ticket_id, title, current_user)
     await db.commit()
-    
-    # Broadcast deletion for real-time UI sync (Global)
+
     await notification_service.broadcast_global_event(
-        type=WSMessageType.TICKET_DELETED, 
+        type=WSMessageType.TICKET_DELETED,
         data={"id": str(ticket_id), "title": title},
         db=db
     )
-    
+
     await cache_invalidate_prefix(CACHE_PREFIX)
 
 
-@router.post("/{ticket_id}/deletion-request", summary="Ask the author to delete a ticket")
-async def request_ticket_deletion(ticket_id: uuid.UUID, db: DB, current_user: CurrentUser):
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
+@router.post("/{ticket_number}/deletion-request", summary="Ask the author to delete a ticket")
+async def request_ticket_deletion(ticket_number: int, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -240,41 +233,40 @@ async def request_ticket_deletion(ticket_id: uuid.UUID, db: DB, current_user: Cu
         requester=current_user,
     )
     await db.commit()
-
     return {"ok": True}
 
 
 from fastapi.responses import StreamingResponse
 
-@router.get("/{ticket_id}/diagnosis")
+@router.get("/{ticket_number}/diagnosis")
 async def get_diagnosis(
-    ticket_id: uuid.UUID,
+    ticket_number: int,
     db: DB,
     current_user: CurrentUser,
 ):
-    """
-    Generate an AI diagnosis and suggested solution for a ticket.
-    Streams the response token-by-token.
-    """
+    """Generate an AI diagnosis and suggested solution for a ticket (streamed)."""
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
     return StreamingResponse(
-        ai_copilot_service.stream_ticket_diagnosis(db, ticket_id),
+        ai_copilot_service.stream_ticket_diagnosis(db, ticket.id),
         media_type="text/event-stream"
     )
 
 
-@router.get("/{ticket_id}/web-context")
+@router.get("/{ticket_number}/web-context")
 async def get_ticket_web_context(
-    ticket_id: uuid.UUID,
+    ticket_number: int,
     db: DB,
     current_user: CurrentUser,
 ):
-    """
-    Fetches the latest AI-extracted web context for this ticket.
-    """
-    # Use a more robust way to query JSON content in SQLAlchemy
+    """Fetches the latest AI-extracted web context for this ticket."""
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
     result = await db.execute(
         select(KnowledgeChunk)
-        .where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket_id))
+        .where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket.id))
         .order_by(KnowledgeChunk.created_at.desc())
         .limit(1)
     )
@@ -282,22 +274,17 @@ async def get_ticket_web_context(
     return {"content": chunk.content if chunk else None}
 
 
-@router.post("/{ticket_id}/web-scrape-refresh")
+@router.post("/{ticket_number}/web-scrape-refresh")
 async def refresh_ticket_web_scrape(
-    ticket_id: uuid.UUID,
+    ticket_number: int,
     db: DB,
     current_user: CurrentUser,
 ):
-    """
-    Manually triggers a new web scrape for the ticket's URL.
-    """
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
+    """Manually triggers a new web scrape for the ticket's URL."""
+    ticket = await ticket_service.get_ticket_by_number(db, ticket_number)
     if not ticket or not ticket.client_url:
         raise HTTPException(status_code=400, detail="Ticket has no URL to scrape.")
-    
-    # Trigger background task
-    asyncio.create_task(scraping_service.scrape_and_index_url(ticket_id, ticket.client_url))
+    asyncio.create_task(scraping_service.scrape_and_index_url(ticket.id, ticket.client_url))
     return {"status": "scraping_started"}
 
 

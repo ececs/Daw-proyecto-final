@@ -354,10 +354,11 @@ async def notify_ticket_updated(
     await broadcast_global_event(
         type=WSMessageType.TICKET_UPDATED,
         data={
-            "id": str(ticket.id), 
+            "id": str(ticket.id),
+            "ticket_number": ticket.ticket_number,
             "title": ticket.title,
             "status": ticket.status.value,
-            "priority": ticket.priority.value
+            "priority": ticket.priority.value,
         },
         db=db
     )

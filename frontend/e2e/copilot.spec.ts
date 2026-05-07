@@ -1,41 +1,25 @@
 import { test, expect } from '@playwright/test';
+import { loginAsDemo } from './helpers/auth';
 
-test.describe('Asistente de IA (Copilot)', () => {
-
+test.describe('AI Assistant (Copilot)', () => {
   test.beforeEach(async ({ page }) => {
-    // Iniciamos sesión con el usuario demo antes de cada test
-    await page.goto('/login');
-    const codeInput = page.locator('#demo-code');
-    await codeInput.fill('Orbidi@2026Xdesafio');
-    const submitButton = page.locator('button[type="submit"]');
-    await submitButton.click();
-    await page.waitForURL(/\/board/);
+    await loginAsDemo(page);
   });
 
-  test('Interacción básica con el asistente de IA Copilot', async ({ page }) => {
-    // Buscamos y hacemos clic en el botón de alternancia del chat de IA
-    const chatToggle = page.locator('button[aria-label="Toggle AI assistant"]');
-    await expect(chatToggle).toBeVisible();
-    await chatToggle.click();
+  test('Basic interaction with the Copilot AI assistant', async ({ page }) => {
+    await page.locator('button[aria-label="Toggle AI assistant"]').click();
+    await expect(page.locator('p:has-text("AI Assistant")')).toBeVisible();
 
-    // Verificamos que el panel del chat flutuante de la IA se haya abierto
-    const assistantHeader = page.locator('p:has-text("AI Assistant")');
-    await expect(assistantHeader).toBeVisible();
-
-    // Buscamos la caja de entrada para el mensaje del asistente
     const chatInput = page.locator('textarea[aria-label="Mensaje para el asistente"]');
     await expect(chatInput).toBeVisible();
 
-    // Escribimos una consulta simple al asistente
-    await chatInput.fill('Hola asistente, ¿en qué me puedes ayudar?');
+    const assistantMessages = page.locator('div.bg-slate-100');
+    const previousCount = await assistantMessages.count();
 
-    // Hacemos clic en el botón para enviar el mensaje
-    const sendButton = page.locator('button[aria-label="Enviar mensaje"]');
-    await sendButton.click();
+    await chatInput.fill('Hello assistant, how can you help me today?');
+    await page.locator('button[aria-label="Enviar mensaje"]').click();
 
-    // El asistente debería comenzar a pensar ("Thinking...") y luego mostrar el contenido de respuesta
-    // Esperamos a que aparezca un mensaje de respuesta del asistente diferente de vacío
-    const responseBubble = page.locator('div.bg-slate-100:has-text("Hi")');
-    await expect(responseBubble).toBeVisible({ timeout: 15000 });
+    await expect(assistantMessages).toHaveCount(previousCount + 1, { timeout: 15000 });
+    await expect(assistantMessages.nth(previousCount)).toBeVisible();
   });
 });

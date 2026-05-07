@@ -46,3 +46,8 @@ docs_private/
 .claude
 
 *.tsbuildinfo
+# Playwright
+playwright-report/
+test-results/
+frontend/playwright-report/
+frontend/test-results/

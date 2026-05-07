@@ -1,46 +1,45 @@
 import { test, expect } from '@playwright/test';
+import { loginAsDemo } from './helpers/auth';
 
-test.describe('Interacción Social (Comentarios y Adjuntos)', () => {
-
+test.describe('Social Interaction (Comments & Attachments)', () => {
   test.beforeEach(async ({ page }) => {
-    // Iniciamos sesión con el usuario demo antes de cada test
-    await page.goto('/login');
-    const codeInput = page.locator('#demo-code');
-    await codeInput.fill('Orbidi@2026Xdesafio');
-    const submitButton = page.locator('button[type="submit"]');
-    await submitButton.click();
-    await page.waitForURL(/\/board/);
+    await loginAsDemo(page);
   });
 
-  test('Añadir y visualizar un comentario en el detalle del ticket', async ({ page }) => {
-    // Esperamos a que la tabla de tickets sea visible
-    const table = page.locator('table');
-    await expect(table).toBeVisible({ timeout: 10000 });
+  test('Add and view a comment in the ticket detail view', async ({ page }) => {
+    const firstTicketRow = page.locator('table tbody tr').first();
+    const hasTicket = await firstTicketRow.isVisible();
 
-    // Hacemos clic en el primer ticket disponible de la tabla para abrir su detalle
-    const firstTicketLink = page.locator('table tbody tr td a').first();
-    await expect(firstTicketLink).toBeVisible();
-    await firstTicketLink.click();
+    if (!hasTicket) {
+      const newTicketButton = page.locator('button:has-text("New ticket")');
+      await expect(newTicketButton).toBeVisible();
+      await newTicketButton.click();
 
-    // Verificamos que se haya cargado la página de detalle del ticket (/tickets/[id])
+      const uniqueTitle = `Comments Test Ticket - ${Date.now()}`;
+      await page.locator('#tf-title').fill(uniqueTitle);
+      await page.locator('#tf-description').fill('Automatically created comments test ticket.');
+      await page.locator('button[type="submit"]:has-text("Create ticket")').click();
+
+      const modalTitle = page.locator('h2:has-text("New ticket")');
+      await expect(modalTitle).not.toBeVisible({ timeout: 10000 });
+
+      const ticketRow = page.locator(`tr:has-text("${uniqueTitle}")`);
+      await expect(ticketRow).toBeVisible({ timeout: 10000 });
+      await ticketRow.locator('span.font-medium').first().click();
+    } else {
+      await firstTicketRow.locator('span.font-medium').first().click();
+    }
+
     await page.waitForURL(/\/tickets\//);
-    const detailHeader = page.locator('h1');
-    await expect(detailHeader).toBeVisible();
+    await expect(page.locator('h1')).toBeVisible();
 
-    // Buscamos el área de texto para escribir el comentario
     const commentTextarea = page.locator('textarea[aria-label="Escribir un comentario"]');
     await expect(commentTextarea).toBeVisible();
 
-    // Generamos un mensaje único para evitar colisiones
-    const uniqueComment = `Test comentario automático Playwright - ${Date.now()}`;
+    const uniqueComment = `Playwright automated test comment - ${Date.now()}`;
     await commentTextarea.fill(uniqueComment);
 
-    // Enviamos el comentario
-    const sendButton = page.locator('button[aria-label="Enviar comentario"]');
-    await sendButton.click();
-
-    // Comprobamos que el comentario recién añadido aparece en la interfaz
-    const commentElement = page.locator(`p:has-text("${uniqueComment}")`);
-    await expect(commentElement).toBeVisible({ timeout: 5000 });
+    await page.locator('button[aria-label="Enviar comentario"]').click();
+    await expect(page.locator(`p:has-text("${uniqueComment}")`)).toBeVisible({ timeout: 5000 });
   });
 });

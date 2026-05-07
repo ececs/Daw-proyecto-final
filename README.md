@@ -528,3 +528,31 @@ Todas las decisiones de arquitectura, integración, permisos, validaciones y com
 ## Licencia
 
 Proyecto desarrollado como reto técnico para **Orbidi**.
+
+## Tests E2E (Playwright)
+
+El proyecto incluye smoke tests E2E con Playwright para validar flujos críticos en navegador real:
+
+- protección de rutas y login
+- creación de tickets
+- comentarios en detalle
+- interacción básica con el asistente IA
+- sincronización en tiempo real entre dos contextos
+
+### Requisitos para ejecutarlos
+
+- backend, base de datos y demás servicios levantados
+- frontend disponible en `http://localhost:3000`
+- variable de entorno `PLAYWRIGHT_DEMO_CODE` definida con un código demo válido
+
+### Ejecución
+
+Desde `frontend/`:
+
+```bash
+export PLAYWRIGHT_DEMO_CODE=tu_codigo_demo
+npm run test:e2e
+```
+
+Nota: la configuración de Playwright arranca automáticamente el frontend con `npm run dev`, pero el backend y la infraestructura deben estar ya disponibles antes de lanzar la suite.
+

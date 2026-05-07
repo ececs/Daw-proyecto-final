@@ -1,0 +1,30 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+ENV PYTHONPATH=/app
+
+# Build tools required to compile asyncpg (a C extension) from source.
+# libpq-dev provides PostgreSQL client headers needed by some drivers.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast dependency installation
+RUN pip install uv
+
+# Copy dependency manifest first (better Docker layer caching)
+COPY pyproject.toml .
+
+# Install dependencies into the system Python (no venv needed in Docker)
+RUN uv pip install --system -e .
+
+COPY . .
+
+EXPOSE 8000
+
+# Run migrations then start the server.
+# alembic upgrade head is idempotent — safe to run on every container start.
+# exec 2>&1 redirects stderr to stdout so Railway classifies all logs as info,
+# not as errors (uvicorn and alembic write to stderr by default).
+CMD ["sh", "-c", "exec 2>&1; alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

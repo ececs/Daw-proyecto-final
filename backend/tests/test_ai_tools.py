@@ -1,0 +1,248 @@
+import uuid
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from app.ai.tools import make_tools
+from app.models.ticket import Ticket, TicketPriority, TicketStatus
+from app.models.ticket_history import TicketHistory
+from app.models.user import User
+
+
+def _capture_task(coro):
+    coro.close()
+    return MagicMock()
+
+
+async def test_update_ticket_tool_schedules_scrape_with_ticket_id_and_url(
+    db_session,
+    test_user: User,
+):
+    ticket = Ticket(
+        title="Client site ticket",
+        description="Used to validate AI update tool scraping hook.",
+        priority=TicketPriority.medium,
+        author_id=test_user.id,
+    )
+    db_session.add(ticket)
+    await db_session.commit()
+
+    tools = make_tools(db_session, test_user)
+    update_tool = next(tool for tool in tools if tool.name == "update_ticket")
+
+    with (
+        patch("app.ai.tools.ticket_service.update_ticket", new=AsyncMock(return_value=SimpleNamespace(id=ticket.id))),
+        patch("app.ai.tools.scraping_service.scrape_and_index_url", new=AsyncMock()) as mock_scrape,
+        patch("app.ai.tools.asyncio.create_task", side_effect=_capture_task) as mock_create_task,
+    ):
+        result = await update_tool.ainvoke(
+            {
+                "ticket_id": str(ticket.id),
+                "client_url": "https://example.com/status",
+            }
+        )
+
+    assert result == "Ticket successfully updated."
+    mock_scrape.assert_called_once_with(ticket.id, "https://example.com/status")
+    mock_create_task.assert_called_once()
+
+
+async def test_update_ticket_tool_does_not_schedule_scrape_without_client_url(
+    db_session,
+    test_user: User,
+):
+    ticket = Ticket(
+        title="Plain ticket",
+        description="Used to validate AI update tool without URL side effects.",
+        priority=TicketPriority.medium,
+        author_id=test_user.id,
+    )
+    db_session.add(ticket)
+    await db_session.commit()
+
+    tools = make_tools(db_session, test_user)
+    update_tool = next(tool for tool in tools if tool.name == "update_ticket")
+
+    with (
+        patch("app.ai.tools.ticket_service.update_ticket", new=AsyncMock(return_value=SimpleNamespace(id=ticket.id))),
+        patch("app.ai.tools.scraping_service.scrape_and_index_url", new=AsyncMock()) as mock_scrape,
+        patch("app.ai.tools.asyncio.create_task", side_effect=_capture_task) as mock_create_task,
+    ):
+        result = await update_tool.ainvoke(
+            {
+                "ticket_id": str(ticket.id),
+                "title": "Renamed without URL",
+            }
+        )
+
+    assert result == "Ticket successfully updated."
+    mock_scrape.assert_not_called()
+    mock_create_task.assert_not_called()
+
+
+async def test_get_ticket_history_tool_formats_entries_in_desc_order(
+    db_session,
+    test_user: User,
+):
+    ticket = Ticket(
+        title="History tool ticket",
+        description="Used to validate AI history formatting.",
+        priority=TicketPriority.medium,
+        author_id=test_user.id,
+    )
+    db_session.add(ticket)
+    await db_session.commit()
+
+    db_session.add_all(
+        [
+            TicketHistory(
+                ticket_id=ticket.id,
+                actor_id=test_user.id,
+                field="created",
+                old_value=None,
+                new_value=None,
+                created_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            ),
+            TicketHistory(
+                ticket_id=ticket.id,
+                actor_id=test_user.id,
+                field="status",
+                old_value="open",
+                new_value="closed",
+                created_at=datetime.now(timezone.utc),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    tools = make_tools(db_session, test_user)
+    history_tool = next(tool for tool in tools if tool.name == "get_ticket_history")
+
+    result = await history_tool.ainvoke({"ticket_id": str(ticket.id), "limit": 10})
+
+    assert "changed status from 'open' to 'closed'" in result
+    assert "created the ticket" in result
+    assert result.index("changed status from 'open' to 'closed'") < result.index("created the ticket")
+
+
+async def test_get_ticket_history_tool_returns_empty_message_when_no_entries(
+    db_session,
+    test_user: User,
+):
+    tools = make_tools(db_session, test_user)
+    history_tool = next(tool for tool in tools if tool.name == "get_ticket_history")
+
+    result = await history_tool.ainvoke({"ticket_id": str(uuid.uuid4())})
+
+    assert result == "No history found for this ticket."
+
+
+async def test_query_tickets_tool_uses_shared_hybrid_search_when_search_present(
+    db_session,
+    test_user: User,
+):
+    tools = make_tools(db_session, test_user)
+    query_tool = next(tool for tool in tools if tool.name == "query_tickets")
+    returned_ticket = Ticket(
+        id=uuid.uuid4(),
+        title="Login bug",
+        description="Shared search result",
+        priority=TicketPriority.high,
+        status=TicketStatus.open,
+        author_id=test_user.id,
+    )
+
+    with patch(
+        "app.ai.tools.ticket_service.hybrid_search_tickets",
+        new=AsyncMock(return_value=[returned_ticket]),
+    ) as mock_hybrid:
+        result = await query_tool.ainvoke({"search": "login", "limit": 5})
+
+    mock_hybrid.assert_awaited_once()
+    assert "Login bug" in result
+    assert "[high]" in result
+
+
+async def test_query_tickets_tool_returns_validation_error_for_invalid_status_without_service_call(
+    db_session,
+    test_user: User,
+):
+    tools = make_tools(db_session, test_user)
+    query_tool = next(tool for tool in tools if tool.name == "query_tickets")
+
+    with patch(
+        "app.ai.tools.ticket_service.hybrid_search_tickets",
+        new=AsyncMock(),
+    ) as mock_hybrid:
+        result = await query_tool.ainvoke({"search": "login", "status": "broken"})
+
+    mock_hybrid.assert_not_called()
+    assert result == "Invalid status 'broken'."
+
+
+async def test_find_users_tool_returns_single_match_with_email(
+    db_session,
+    test_user: User,
+):
+    tools = make_tools(db_session, test_user)
+    find_users_tool = next(tool for tool in tools if tool.name == "find_users")
+
+    result = await find_users_tool.ainvoke({"name": "Test"})
+
+    assert f"Found exactly 1 match: {test_user.name} ({test_user.email})." in result
+    assert f"¿Asigno a {test_user.name}?" in result
+    assert f"If the user confirms, call reassign_ticket with this email: {test_user.email}." in result
+
+
+async def test_find_users_tool_returns_multiple_matches_and_prompts_for_confirmation(
+    db_session,
+    test_user: User,
+    second_user: User,
+):
+    second_user.name = "Test Operator"
+    await db_session.commit()
+
+    tools = make_tools(db_session, test_user)
+    find_users_tool = next(tool for tool in tools if tool.name == "find_users")
+
+    result = await find_users_tool.ainvoke({"name": "Test"})
+
+    assert "Found 2 users matching 'Test':" in result
+    assert test_user.email in result
+    assert second_user.email in result
+    assert "Ask the user which full name they mean." in result
+    assert "Only ask for the email if the names are still ambiguous." in result
+
+
+async def test_find_users_tool_returns_helpful_message_when_no_matches(
+    db_session,
+    test_user: User,
+):
+    tools = make_tools(db_session, test_user)
+    find_users_tool = next(tool for tool in tools if tool.name == "find_users")
+
+    result = await find_users_tool.ainvoke({"name": "NoSuchUser"})
+
+    assert result == "No users found matching 'NoSuchUser'. Ask the user for their exact email."
+
+
+async def test_delete_ticket_tool_offers_author_notification_when_actor_cannot_delete(
+    db_session,
+    test_user: User,
+    second_user: User,
+):
+    ticket = Ticket(
+        title="Protected ticket",
+        description="Only the author should be able to delete it.",
+        priority=TicketPriority.medium,
+        author_id=second_user.id,
+    )
+    db_session.add(ticket)
+    await db_session.commit()
+
+    tools = make_tools(db_session, test_user)
+    delete_tool = next(tool for tool in tools if tool.name == "delete_ticket")
+
+    result = await delete_tool.ainvoke({"ticket_id": str(ticket.id)})
+
+    assert result == f"__DELETE_REQUEST_OFFER__:{ticket.id}:{ticket.title}"

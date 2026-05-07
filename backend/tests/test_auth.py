@@ -153,7 +153,9 @@ async def test_demo_login_rate_limited_returns_429(unauth_client: AsyncClient):
             new_callable=AsyncMock,
             return_value=True,
         ):
-            r = await unauth_client.post(
-                "/api/v1/auth/demo-login", json={"code": "secret123"}
-            )
+            with patch("app.api.v1.auth.ip_address") as mock_ip:
+                mock_ip.return_value.is_loopback = False
+                r = await unauth_client.post(
+                    "/api/v1/auth/demo-login", json={"code": "secret123"}
+                )
     assert r.status_code == 429

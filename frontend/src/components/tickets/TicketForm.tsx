@@ -106,7 +106,7 @@ export function TicketForm({ open, onClose, onSuccess, ticket, users }: TicketFo
         <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 animate-in fade-in" />
 
         {/* Panel */}
-        <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 animate-in fade-in zoom-in-95">
+        <Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 animate-in fade-in zoom-in-95">
           {/* Header */}
           <div className="flex items-center justify-between mb-5">
             <Dialog.Title className="text-lg font-semibold text-slate-800">

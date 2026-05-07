@@ -123,6 +123,8 @@ async def stream_ticket_diagnosis(db: AsyncSession, ticket_id: uuid.UUID):
     """
     Async generator that yields diagnosis tokens for real-time streaming.
     """
+    from app.ai import observability
+    observability.increment_diagnosis()
     try:
         sys_p, user_p, _ = await _prepare_diagnosis_context(db, ticket_id)
         if not sys_p:

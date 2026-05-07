@@ -176,6 +176,7 @@ async def chat(
     checkpointer = get_checkpointer()
     thread_id = request.thread_id or str(current_user.id)
 
+    observability.increment_chat()
     v_logger = logging.getLogger("uvicorn.error")
     v_logger.info("AI Session: thread_id=%s", thread_id)
 

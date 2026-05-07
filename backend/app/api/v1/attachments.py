@@ -9,7 +9,8 @@ from fastapi import APIRouter, HTTPException, UploadFile, status
 from app.core.config import settings
 from app.core.dependencies import CurrentUser, DB
 from app.schemas.attachment import AttachmentOut
-from app.services import attachment_service
+from app.services import attachment_service, notification_service
+from app.schemas.websocket import WSMessageType
 
 router = APIRouter(prefix="/tickets", tags=["Attachments"])
 
@@ -73,7 +74,12 @@ async def upload_attachment(
 
     if not attachment:
         raise HTTPException(status_code=404, detail="Ticket not found")
-        
+
+    await notification_service.broadcast_global_event(
+        type=WSMessageType.TICKET_UPDATED,
+        data={"id": str(ticket_id)},
+        db=db,
+    )
     return attachment
 
 
@@ -102,6 +108,12 @@ async def delete_attachment(
         if not exists:
             raise HTTPException(status_code=404, detail="Attachment not found")
         raise HTTPException(status_code=403, detail="You can only delete your own attachments")
+
+    await notification_service.broadcast_global_event(
+        type=WSMessageType.TICKET_UPDATED,
+        data={"id": str(ticket_id)},
+        db=db,
+    )
 
 
 @router.patch(

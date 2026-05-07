@@ -56,6 +56,14 @@ async def lifespan(app: FastAPI):
     await _init_storage()
     await init_checkpointer()
     await init_cache()
+
+    # Warm up the LLM singleton so observability status is populated from the start
+    try:
+        from app.ai.agent import get_llm
+        get_llm()
+        logger.info("✅ AI LLM initialized")
+    except Exception as e:
+        logger.warning("⚠️  AI LLM warm-up failed: %s", e)
     # Redis Pub/Sub when available; PG LISTEN/NOTIFY as fallback
     if pubsub_service.is_redis_available():
         logger.info("Real-time transport: Redis Pub/Sub")

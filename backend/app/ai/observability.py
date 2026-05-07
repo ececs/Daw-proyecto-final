@@ -23,7 +23,12 @@ class _AIState:
     fallback_model: Optional[str] = None
     last_error: Optional[str] = None
     last_error_at: Optional[str] = None
-    action_count: int = 0
+    # Usage counters — reset on process restart
+    action_count: int = 0       # agent tool executions
+    chat_count: int = 0         # /ai/chat POST requests
+    diagnoses_count: int = 0    # AI copilot diagnoses streamed
+    rag_queries_count: int = 0  # search_knowledge tool calls
+    rag_hits_count: int = 0     # searches that returned ≥1 chunk
 
 
 _state = _AIState()
@@ -50,6 +55,26 @@ def increment_action() -> None:
         _state.action_count += 1
 
 
+def increment_chat() -> None:
+    """Called on each POST /ai/chat request."""
+    with _lock:
+        _state.chat_count += 1
+
+
+def increment_diagnosis() -> None:
+    """Called when a streaming AI diagnosis is started."""
+    with _lock:
+        _state.diagnoses_count += 1
+
+
+def increment_rag_query(had_results: bool) -> None:
+    """Called on each search_knowledge tool call."""
+    with _lock:
+        _state.rag_queries_count += 1
+        if had_results:
+            _state.rag_hits_count += 1
+
+
 def record_error(message: str) -> None:
     """Store the most recent error message with a UTC timestamp."""
     with _lock:
@@ -68,4 +93,8 @@ def get_status() -> dict:
             "last_error": _state.last_error,
             "last_error_at": _state.last_error_at,
             "action_count": _state.action_count,
+            "chat_count": _state.chat_count,
+            "diagnoses_count": _state.diagnoses_count,
+            "rag_queries_count": _state.rag_queries_count,
+            "rag_hits_count": _state.rag_hits_count,
         }

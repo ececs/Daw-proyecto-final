@@ -299,6 +299,8 @@ def make_tools(db: AsyncSession, actor: User) -> List:
         async with lock:
             try:
                 chunks = await knowledge_service.search(db, query, k=k)
+                from app.ai import observability
+                observability.increment_rag_query(had_results=bool(chunks))
                 return "\n\n".join(chunks) if chunks else "No information found."
             except Exception as e:
                 return f"Error: {e}"

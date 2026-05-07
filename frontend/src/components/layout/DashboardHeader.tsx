@@ -26,6 +26,7 @@ import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { useNotifications } from "@/hooks/useNotifications";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ChatSidebar } from "@/components/ai-chat/ChatSidebar";
+import { AIStatusButton } from "@/components/ai/AIStatusPanel";
 import { useUIStore } from "@/hooks/useUIStore";
 import api from "@/lib/api";
 
@@ -85,6 +86,8 @@ export function DashboardHeader({ token }: DashboardHeaderProps) {
             <Bot className="w-4 h-4" />
             <span className="hidden sm:block">AI</span>
           </button>
+
+          <AIStatusButton />
 
           <NotificationBell />
 

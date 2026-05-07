@@ -30,7 +30,6 @@ import { STATUS_LABELS, PRIORITY_CONFIG, timeAgo, formatDateTime, formatFileSize
 import { useUsers } from "@/hooks/useUsers";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { AIStatusPanel } from "@/components/ai/AIStatusPanel";
 import { isRagEligible } from "@/lib/attachmentUtils";
 import useNotificationStore from "@/stores/notificationStore";
 import useAuthStore from "@/stores/authStore";
@@ -525,9 +524,6 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
               </div>
             </div>
           )}
-
-          {/* AI Observability */}
-          <AIStatusPanel />
 
           {/* Client URL Context */}
           <div className="bg-white rounded-xl border border-slate-200 p-4">

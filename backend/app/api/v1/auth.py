@@ -15,6 +15,7 @@ The state is validated in the callback before the code exchange.
 
 import logging
 import secrets
+from ipaddress import AddressValueError, ip_address
 from urllib.parse import urlencode
 
 logger = logging.getLogger(__name__)
@@ -184,10 +185,18 @@ async def demo_login(request: Request, body: DemoLoginRequest, db: DB):
     Useful for evaluators who don't want to use Google OAuth.
     """
     # --- Rate Limiting ---
-    # Max 5 attempts per 15 minutes per IP to prevent brute-force
+    # Max 5 attempts per 15 minutes per IP to prevent brute-force.
+    # Local loopback and common Docker bridge gateways are exempt so Playwright/dev flows stay smooth.
     ip = request.client.host if request.client else "unknown"
+    docker_local_gateways = {"172.17.0.1", "172.18.0.1", "172.19.0.1", "host.docker.internal"}
+    is_local = ip == "localhost" or ip in docker_local_gateways
+    if not is_local:
+        try:
+            is_local = ip_address(ip).is_loopback
+        except AddressValueError:
+            is_local = False
     from app.services.cache_service import is_rate_limited
-    if await is_rate_limited(f"demo_login:{ip}", limit=5, window=900):
+    if not is_local and await is_rate_limited(f"demo_login:{ip}", limit=5, window=900):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Demasiados intentos. Por favor, espera 15 minutos."

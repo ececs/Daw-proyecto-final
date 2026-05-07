@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.user import User
 from app.ai.tools import make_tools
+from app.ai import observability
 from app.ai.checkpoint import get_checkpointer
 from app.ai.state import AgentState
 
@@ -124,7 +125,6 @@ def _build_llm() -> BaseChatModel:
     if settings.AI_PROVIDER == "google" and settings.OPENAI_API_KEY:
         try:
             from langchain_openai import ChatOpenAI
-            import httpx
             fallback_llm = ChatOpenAI(
                 model="gpt-4o-mini",
                 api_key=settings.OPENAI_API_KEY,
@@ -133,7 +133,12 @@ def _build_llm() -> BaseChatModel:
                 request_timeout=30.0,
             )
             logger.info("AI Agent: %s (with GPT-4o-mini fallback)", primary_model)
-            # Envolvemos el LLM con fallbacks para que sea resiliente
+            observability.configure(
+                provider=settings.AI_PROVIDER,
+                model=primary_model,
+                fallback_available=True,
+                fallback_model="gpt-4o-mini",
+            )
             return primary_llm.with_fallbacks(
                 [fallback_llm],
                 exceptions_to_handle=(Exception,),
@@ -143,6 +148,11 @@ def _build_llm() -> BaseChatModel:
     elif settings.AI_PROVIDER == "google":
         logger.warning("AI Agent: OPENAI_API_KEY not set — fallback disabled.")
 
+    observability.configure(
+        provider=settings.AI_PROVIDER,
+        model=primary_model,
+        fallback_available=False,
+    )
     logger.info("AI Agent: %s (no fallback)", primary_model)
     return primary_llm
 

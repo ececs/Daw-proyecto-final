@@ -46,7 +46,9 @@ const HISTORY_LABELS: Record<string, (old: string | null, next: string | null) =
   assignee:    (o, n)      => n ? `assigned to ${n}` : `unassigned${o ? ` from ${o}` : ""}`,
   title:       ()          => "renamed the ticket",
   description: ()          => "updated the description",
-  client_url:  (_, n)      => n ? `set client URL to ${n}` : "removed client URL",
+  client_url:        (_, n) => n ? `set client URL to ${n}` : "removed client URL",
+  attachment_added:  (_, n) => `uploaded attachment ${fmt(n)}`,
+  attachment_removed:(o)    => `deleted attachment ${fmt(o)}`,
 };
 
 interface TicketDetailProps {

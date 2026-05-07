@@ -3,18 +3,21 @@ Attachment service: file storage (MinIO/R2) + database metadata for ticket attac
 Returns Pydantic schemas rather than ORM models to keep the API layer decoupled.
 """
 
+import asyncio
 import logging
 import uuid
 from typing import List, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-logger = logging.getLogger(__name__)
-
+from app.db.session import AsyncSessionLocal
 from app.models.attachment import Attachment
 from app.models.ticket import Ticket
 from app.schemas.attachment import AttachmentOut
-from app.services import knowledge_service, storage_service
+from app.services import history_service, knowledge_service, storage_service
+
+logger = logging.getLogger(__name__)
 
 
 async def _to_schema(attachment: Attachment) -> AttachmentOut:
@@ -38,6 +41,35 @@ async def _to_schema(attachment: Attachment) -> AttachmentOut:
     )
 
 
+async def _ingest_attachment_bg(
+    attachment_id: str,
+    storage_key: str,
+    ticket_id: str,
+    mime_type: str,
+) -> None:
+    """
+    Background task: download and index an attachment into RAG knowledge chunks.
+
+    Opens its own session so the HTTP response is not blocked by embedding calls.
+    """
+    async with AsyncSessionLocal() as db:
+        try:
+            content = await storage_service.download_file(storage_key)
+            result = await knowledge_service.ingest_attachment(
+                db,
+                attachment_id=attachment_id,
+                ticket_id=ticket_id,
+                content=content,
+                mime_type=mime_type,
+            )
+            logger.info("RAG ingestion complete: %s", result)
+        except Exception as exc:
+            logger.warning(
+                "Background RAG ingestion failed for attachment %s: %s",
+                attachment_id, exc, exc_info=True,
+            )
+
+
 async def list_attachments(
     db: AsyncSession,
     ticket_id: uuid.UUID,
@@ -59,15 +91,11 @@ async def create_attachment(
     content: bytes,
     mime_type: str,
 ) -> Optional[AttachmentOut]:
-    """
-    Uploads a file to storage and saves metadata to the database.
-    """
-    # 1. Verify ticket
+    """Upload a file to storage, save metadata, and record history."""
     ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     if not ticket_result.scalar_one_or_none():
         return None
 
-    # 2. Upload to storage (MinIO/R2)
     storage_key = await storage_service.upload_file(
         ticket_id=ticket_id,
         filename=filename,
@@ -95,6 +123,16 @@ async def create_attachment(
             pass
         raise
 
+    await history_service.record_change(
+        db,
+        ticket_id=ticket_id,
+        actor_id=uploader_id,
+        field="attachment_added",
+        old_value=None,
+        new_value=filename,
+    )
+    await db.commit()
+
     return await _to_schema(attachment)
 
 
@@ -103,26 +141,35 @@ async def delete_attachment(
     attachment_id: uuid.UUID,
     actor_id: uuid.UUID,
 ) -> bool:
-    """
-    Deletes an attachment from both storage and database.
-    """
+    """Delete an attachment from storage and database, and record history."""
     result = await db.execute(select(Attachment).where(Attachment.id == attachment_id))
     attachment = result.scalar_one_or_none()
-    
+
     if not attachment or attachment.uploader_id != actor_id:
         return False
 
+    ticket_id = attachment.ticket_id
+    filename = attachment.filename
+    storage_key = attachment.storage_key
+
+    await history_service.record_change(
+        db,
+        ticket_id=ticket_id,
+        actor_id=actor_id,
+        field="attachment_removed",
+        old_value=filename,
+        new_value=None,
+    )
     # Delete DB metadata first. If storage cleanup fails afterwards, the user
     # still gets a consistent application state and the leftover object can be
     # cleaned up later.
     await db.delete(attachment)
     await db.commit()
 
-    # Clean up any knowledge chunks indexed from this attachment
     await knowledge_service.delete_attachment_chunks(db, str(attachment_id))
 
     try:
-        await storage_service.delete_file(attachment.storage_key)
+        await storage_service.delete_file(storage_key)
     except Exception:
         pass
     return True
@@ -136,9 +183,8 @@ async def update_attachment_rag(
     """
     Toggle RAG indexing for an attachment.
 
-    When enabled: downloads the file from storage, extracts text, chunks,
-    embeds, and persists to knowledge_chunks.
-    When disabled: removes all associated knowledge chunks.
+    Persists the flag immediately and returns. Ingestion runs as a background
+    task so the HTTP response is not blocked by embedding API calls.
     """
     result = await db.execute(select(Attachment).where(Attachment.id == attachment_id))
     attachment = result.scalar_one_or_none()
@@ -150,24 +196,14 @@ async def update_attachment_rag(
     await db.refresh(attachment)
 
     if use_for_rag:
-        try:
-            logger.info("RAG ingestion starting for attachment %s", attachment.id)
-            content = await storage_service.download_file(attachment.storage_key)
-            logger.info("RAG download OK (%d bytes), extracting text...", len(content))
-            result = await knowledge_service.ingest_attachment(
-                db,
-                attachment_id=str(attachment.id),
-                ticket_id=str(attachment.ticket_id),
-                content=content,
-                mime_type=attachment.mime_type,
-            )
-            logger.info("RAG ingestion complete: %s", result)
-        except Exception as exc:
-            # Ingestion failure is non-fatal: the flag is already set and the user
-            # can retry by toggling the checkbox again.
-            logger.warning("RAG ingestion failed for attachment %s: %s", attachment.id, exc, exc_info=True)
+        # Fire-and-forget: avoids blocking the HTTP response on ~15 embedding calls
+        asyncio.create_task(_ingest_attachment_bg(
+            attachment_id=str(attachment.id),
+            storage_key=attachment.storage_key,
+            ticket_id=str(attachment.ticket_id),
+            mime_type=attachment.mime_type,
+        ))
     else:
         await knowledge_service.delete_attachment_chunks(db, str(attachment_id))
 
     return await _to_schema(attachment)
-

@@ -29,7 +29,7 @@ def upgrade() -> None:
     # --- tickets ---
     op.execute("DROP INDEX IF EXISTS tickets_embedding_hnsw")
     op.drop_column("tickets", "embedding")
-    op.add_column("tickets", sa.Column("embedding", Vector(1536), nullable=True))
+    op.add_column("tickets", sa.Column("embedding", Vector(768), nullable=True))
     op.execute(
         "CREATE INDEX IF NOT EXISTS tickets_embedding_hnsw "
         "ON tickets USING hnsw (embedding vector_cosine_ops) "
@@ -39,7 +39,7 @@ def upgrade() -> None:
     # --- knowledge_chunks ---
     op.execute("DROP INDEX IF EXISTS knowledge_chunks_embedding_hnsw")
     op.drop_column("knowledge_chunks", "embedding")
-    op.add_column("knowledge_chunks", sa.Column("embedding", Vector(1536), nullable=True))
+    op.add_column("knowledge_chunks", sa.Column("embedding", Vector(768), nullable=True))
     op.execute(
         "CREATE INDEX IF NOT EXISTS knowledge_chunks_embedding_hnsw "
         "ON knowledge_chunks USING hnsw (embedding vector_cosine_ops) "

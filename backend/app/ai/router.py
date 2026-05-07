@@ -36,6 +36,7 @@ from langchain_core.messages import HumanMessage
 from app.core.dependencies import CurrentUser, DB
 from app.ai.agent import build_agent
 from app.ai.checkpoint import get_checkpointer
+from app.ai import observability
 
 router = APIRouter(prefix="/ai", tags=["AI Agent"])
 
@@ -95,6 +96,7 @@ async def _agent_sse_stream(agent, initial_state, config: dict, thread_id: str):
                 yield f"data: {json.dumps({'type': 'tool_start', 'name': event.get('name', '')})}\n\n"
 
             elif kind == "on_tool_end":
+                observability.increment_action()
                 tool_name = event.get("name", "")
                 raw_output = event.get("data", {}).get("output", "")
                 tool_output = str(raw_output.content) if hasattr(raw_output, "content") else str(raw_output)
@@ -122,6 +124,7 @@ async def _agent_sse_stream(agent, initial_state, config: dict, thread_id: str):
     except Exception as e:
         error_msg = str(e)
         v_logger.error("SSE stream error: %s", error_msg, exc_info=True)
+        observability.record_error(error_msg)
         friendly = _make_friendly_error(error_msg)
         yield f"data: {json.dumps({'type': 'error', 'content': friendly})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -261,3 +264,12 @@ async def chat(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/status", summary="AI assistant operational status")
+async def get_ai_status(current_user: CurrentUser):
+    """
+    Return live observability data for the AI assistant:
+    provider, active model, fallback availability, last error, and action count.
+    """
+    return observability.get_status()

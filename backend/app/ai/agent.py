@@ -122,6 +122,9 @@ def _build_llm() -> BaseChatModel:
         )
 
     # 2. Fallback LLM — only for transient errors (network, quota), not config errors
+    fallback_llm = None
+    fallback_model = None
+
     if settings.AI_PROVIDER == "google" and settings.OPENAI_API_KEY:
         try:
             from langchain_openai import ChatOpenAI
@@ -132,21 +135,37 @@ def _build_llm() -> BaseChatModel:
                 streaming=True,
                 request_timeout=30.0,
             )
-            logger.info("AI Agent: %s (with GPT-4o-mini fallback)", primary_model)
-            observability.configure(
-                provider=settings.AI_PROVIDER,
-                model=primary_model,
-                fallback_available=True,
-                fallback_model="gpt-4o-mini",
-            )
-            return primary_llm.with_fallbacks(
-                [fallback_llm],
-                exceptions_to_handle=(Exception,),
-            )
+            fallback_model = "gpt-4o-mini"
         except ImportError:
             logger.warning("AI Agent: langchain-openai not installed — fallback disabled.")
-    elif settings.AI_PROVIDER == "google":
-        logger.warning("AI Agent: OPENAI_API_KEY not set — fallback disabled.")
+    elif settings.AI_PROVIDER == "openai" and settings.GOOGLE_API_KEY:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            fallback_llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                google_api_key=settings.GOOGLE_API_KEY,
+                temperature=0,
+                streaming=True,
+                max_retries=0,
+            )
+            fallback_model = "gemini-2.5-flash"
+        except ImportError:
+            logger.warning("AI Agent: langchain-google-genai not installed — fallback disabled.")
+
+    if fallback_llm is not None:
+        logger.info("AI Agent: %s (with %s fallback)", primary_model, fallback_model)
+        observability.configure(
+            provider=settings.AI_PROVIDER,
+            model=primary_model,
+            fallback_available=True,
+            fallback_model=fallback_model,
+        )
+        return primary_llm.with_fallbacks(
+            [fallback_llm],
+            exceptions_to_handle=(Exception,),
+        )
+    else:
+        logger.warning("AI Agent: Fallback disabled (missing key or library).")
 
     observability.configure(
         provider=settings.AI_PROVIDER,

@@ -13,7 +13,7 @@ test.describe('AI Assistant (Copilot)', () => {
     const chatInput = page.locator('textarea[aria-label="Mensaje para el asistente"]');
     await expect(chatInput).toBeVisible();
 
-    const assistantMessages = page.locator('div.bg-slate-100');
+    const assistantMessages = page.locator('.overflow-y-auto div.bg-slate-100');
     const previousCount = await assistantMessages.count();
 
     await chatInput.fill('Hello assistant, how can you help me today?');

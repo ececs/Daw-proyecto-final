@@ -28,7 +28,7 @@ import { useToast } from "@/hooks/use-toast";
 const STATUSES: TicketStatus[] = ["open", "in_progress", "in_review", "closed"];
 const PRIORITIES: TicketPriority[] = ["low", "medium", "high", "critical"];
 
-type SortField = "title" | "status" | "priority" | "created_at";
+type SortField = "title" | "status" | "priority" | "created_at" | "ticket_number";
 type SortDir = "asc" | "desc";
 
 interface TicketTableProps {
@@ -231,8 +231,8 @@ export function TicketTable({
                   }
                 </button>
               </th>
-              <th className="text-left px-4 py-3 min-w-[96px]">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Ref</span>
+              <th className="text-left px-4 py-3 min-w-[96px]" aria-sort={sortBy === "ticket_number" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+                <ColHeader field="ticket_number" label="Ref" />
               </th>
               <th className="text-left px-4 py-3 min-w-[280px]" aria-sort={sortBy === "title" ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
                 <ColHeader field="title" label="Title" />

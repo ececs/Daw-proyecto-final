@@ -51,6 +51,7 @@ SORTABLE_COLUMNS = {
     "priority": Ticket.priority,
     "status": Ticket.status,
     "title": Ticket.title,
+    "ticket_number": Ticket.ticket_number,
 }
 
 

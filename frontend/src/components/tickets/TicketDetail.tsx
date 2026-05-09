@@ -618,57 +618,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
             </div>
           )}
 
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
-                <BarChart3 className="w-4 h-4 text-blue-500" /> Impacto de IA en este ticket
-              </h2>
-              {isLoadingAITicketStats && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
-            </div>
-            {aiTicketStats ? (
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Diagnósticos</p>
-                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.diagnosis_runs}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Chats ligados</p>
-                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.chat_runs}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Consultas RAG</p>
-                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.rag_queries_count}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Hit rate RAG</p>
-                  <p className="text-sm font-semibold text-slate-800">{Math.round(aiTicketStats.rag_hit_rate * 100)}%</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Feedback positivo</p>
-                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.positive_feedback_count}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Coste estimado</p>
-                  <p className="text-sm font-semibold text-slate-800">${aiTicketStats.estimated_cost_usd.toFixed(4)}</p>
-                </div>
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500">Todavía no hay actividad de IA asociada a este ticket.</p>
-            )}
-            {aiTicketStats && (
-              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                <span>
-                  Último uso: {aiTicketStats.last_ai_used_at ? formatDateTime(aiTicketStats.last_ai_used_at) : "—"}
-                </span>
-                <span>
-                  Tiempo hasta cierre: {aiTicketStats.time_to_close_hours !== null ? `${aiTicketStats.time_to_close_hours} h` : "Abierto"}
-                </span>
-                <span>
-                  Ayuda global: {aiTicketStats.helped === null ? "Sin feedback" : aiTicketStats.helped ? "Positiva" : "Negativa"}
-                </span>
-              </div>
-            )}
-          </div>
+
 
           {/* Client URL Context */}
           <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -1020,6 +970,58 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
                 {isSubmittingComment ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </button>
             </form>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                <BarChart3 className="w-4 h-4 text-blue-500" /> Impacto de IA en este ticket
+              </h2>
+              {isLoadingAITicketStats && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
+            </div>
+            {aiTicketStats ? (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Diagnósticos</p>
+                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.diagnosis_runs}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Chats ligados</p>
+                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.chat_runs}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Consultas RAG</p>
+                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.rag_queries_count}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Hit rate RAG</p>
+                  <p className="text-sm font-semibold text-slate-800">{Math.round(aiTicketStats.rag_hit_rate * 100)}%</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Feedback positivo</p>
+                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.positive_feedback_count}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Coste estimado</p>
+                  <p className="text-sm font-semibold text-slate-800">${aiTicketStats.estimated_cost_usd.toFixed(4)}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Todavía no hay actividad de IA asociada a este ticket.</p>
+            )}
+            {aiTicketStats && (
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                <span>
+                  Último uso: {aiTicketStats.last_ai_used_at ? formatDateTime(aiTicketStats.last_ai_used_at) : "—"}
+                </span>
+                <span>
+                  Tiempo hasta cierre: {aiTicketStats.time_to_close_hours !== null ? `${aiTicketStats.time_to_close_hours} h` : "Abierto"}
+                </span>
+                <span>
+                  Ayuda global: {aiTicketStats.helped === null ? "Sin feedback" : aiTicketStats.helped ? "Positiva" : "Negativa"}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Activity */}

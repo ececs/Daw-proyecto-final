@@ -319,7 +319,12 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
             try:
                 from app.services import ai_copilot_service
                 tid = uuid.UUID(ticket_id)
-                diagnosis = await ai_copilot_service.get_ticket_diagnosis(db, tid, tracker=metrics_tracker)
+                diagnosis = await ai_copilot_service.get_ticket_diagnosis(
+                    db,
+                    tid,
+                    tracker=metrics_tracker,
+                    preferred_provider=metrics_tracker.primary_provider if metrics_tracker else None,
+                )
                 return diagnosis
             except Exception as e:
                 return f"Error al generar diagnóstico: {e}"

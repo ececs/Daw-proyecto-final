@@ -27,6 +27,7 @@ import { useSelectionStore } from "@/stores/useSelectionStore";
 import { ChatMessage } from "@/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import api from "@/lib/api";
+import { getAIPreference } from "@/lib/aiPreference";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -153,6 +154,7 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
           thread_id: threadIdRef.current,
           current_ticket_id: currentTicketId,
           selected_ticket_ids: selectedTicketIds,
+          preferred_provider: getAIPreference(),
         }),
         signal: abortRef.current.signal,
       });

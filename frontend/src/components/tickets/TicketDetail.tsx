@@ -24,6 +24,7 @@ import {
   Ticket, Comment, Attachment, TicketStatus, TicketPriority, User, TicketHistory, AITicketStats,
 } from "@/types";
 import { getAuthToken } from "@/lib/auth";
+import { getAIPreference } from "@/lib/aiPreference";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { STATUS_LABELS, PRIORITY_CONFIG, timeAgo, formatDateTime, formatFileSize } from "@/lib/utils";
@@ -353,7 +354,8 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
     try {
       const token = getAuthToken();
       
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/tickets/${ticketId}/diagnosis`, {
+      const preferredProvider = getAIPreference();
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/tickets/${ticketId}/diagnosis?preferred_provider=${preferredProvider}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         }

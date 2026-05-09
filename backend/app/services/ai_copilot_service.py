@@ -106,7 +106,10 @@ async def _prepare_diagnosis_context(
 
 
 async def get_ticket_diagnosis(
-    db: AsyncSession, ticket_id: uuid.UUID, tracker: AIRunTracker | None = None
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    tracker: AIRunTracker | None = None,
+    preferred_provider: str | None = None,
 ) -> str:
     """
     Non-streaming version of diagnosis.
@@ -116,7 +119,7 @@ async def get_ticket_diagnosis(
         if not sys_p:
             return "Error: Ticket not found."
 
-        llm = get_llm()
+        llm = get_llm(preferred_provider)
         response = await llm.ainvoke([
             {"role": "system", "content": sys_p},
             {"role": "user", "content": user_p}
@@ -131,7 +134,10 @@ async def get_ticket_diagnosis(
 
 
 async def stream_ticket_diagnosis(
-    db: AsyncSession, ticket_id: uuid.UUID, tracker: AIRunTracker | None = None
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    tracker: AIRunTracker | None = None,
+    preferred_provider: str | None = None,
 ):
     """
     Async generator that yields diagnosis tokens for real-time streaming.
@@ -142,7 +148,7 @@ async def stream_ticket_diagnosis(
             yield {"type": "error", "content": "Ticket no encontrado."}
             return
 
-        llm = get_llm()
+        llm = get_llm(preferred_provider)
         payload = [
             {"role": "system", "content": sys_p},
             {"role": "user", "content": user_p}

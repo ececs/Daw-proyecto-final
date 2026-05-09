@@ -15,6 +15,7 @@ System prompt:
 """
 
 import logging
+from functools import lru_cache
 from langchain_core.messages import SystemMessage
 from langchain_core.language_models import BaseChatModel
 from langgraph.prebuilt import create_react_agent
@@ -29,7 +30,6 @@ from app.ai.state import AgentState
 from app.services.ai_metrics_service import AIRunTracker
 
 logger = logging.getLogger(__name__)
-_llm_singleton: BaseChatModel | None = None
 
 
 SYSTEM_PROMPT = """You are an AI assistant for D4-Ticket AI, a professional ticketing system.
@@ -83,24 +83,31 @@ Guidelines:
 """
 
 
-def get_llm() -> BaseChatModel:
+def _resolve_primary_choice(preferred_provider: str | None) -> tuple[str, str]:
+    normalized = (preferred_provider or "auto").lower()
+    if normalized == "openai":
+        return "openai", "gpt-4o-mini"
+    if normalized == "google":
+        return "google", "gemini-2.5-flash"
+    default_model = settings.AI_MODEL or (
+        "gemini-2.5-flash" if settings.AI_PROVIDER == "google" else "gpt-4o-mini"
+    )
+    return settings.AI_PROVIDER, default_model
+
+
+@lru_cache(maxsize=4)
+def get_llm(preferred_provider: str | None = None) -> BaseChatModel:
     """
-    Return the LLM singleton, building it on first call.
-    Primary: Gemini 2.5 Flash — Fallback: OpenAI GPT-4o-mini.
-    Cached at module level to avoid re-instantiating HTTP clients per request.
+    Return a cached LLM instance for the requested provider preference.
+    Always keeps the opposite provider as fallback when credentials exist.
     """
-    global _llm_singleton
-    if _llm_singleton is not None:
-        return _llm_singleton
-    _llm_singleton = _build_llm()
-    return _llm_singleton
+    return _build_llm(preferred_provider)
 
 
-def _build_llm() -> BaseChatModel:
-    primary_model = settings.AI_MODEL or "gemini-2.5-flash"
+def _build_llm(preferred_provider: str | None = None) -> BaseChatModel:
+    primary_provider, primary_model = _resolve_primary_choice(preferred_provider)
 
-    # 1. Primary LLM
-    if settings.AI_PROVIDER == "google":
+    if primary_provider == "google":
         if not settings.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY no encontrada. Revisa tu archivo .env en la carpeta backend.")
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -126,7 +133,7 @@ def _build_llm() -> BaseChatModel:
     fallback_llm = None
     fallback_model = None
 
-    if settings.AI_PROVIDER == "google" and settings.OPENAI_API_KEY:
+    if primary_provider == "google" and settings.OPENAI_API_KEY:
         try:
             from langchain_openai import ChatOpenAI
             fallback_llm = ChatOpenAI(
@@ -139,7 +146,7 @@ def _build_llm() -> BaseChatModel:
             fallback_model = "gpt-4o-mini"
         except ImportError:
             logger.warning("AI Agent: langchain-openai not installed — fallback disabled.")
-    elif settings.AI_PROVIDER == "openai" and settings.GOOGLE_API_KEY:
+    elif primary_provider == "openai" and settings.GOOGLE_API_KEY:
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
             fallback_llm = ChatGoogleGenerativeAI(
@@ -156,7 +163,7 @@ def _build_llm() -> BaseChatModel:
     if fallback_llm is not None:
         logger.info("AI Agent: %s (with %s fallback)", primary_model, fallback_model)
         observability.configure(
-            provider=settings.AI_PROVIDER,
+            provider=primary_provider,
             model=primary_model,
             fallback_available=True,
             fallback_model=fallback_model,
@@ -169,7 +176,7 @@ def _build_llm() -> BaseChatModel:
         logger.warning("AI Agent: Fallback disabled (missing key or library).")
 
     observability.configure(
-        provider=settings.AI_PROVIDER,
+        provider=primary_provider,
         model=primary_model,
         fallback_available=False,
     )
@@ -182,11 +189,12 @@ def build_agent(
     actor: User,
     system_context: str = "",
     metrics_tracker: AIRunTracker | None = None,
+    preferred_provider: str | None = None,
 ):
     """
     Build a ReAct agent for a single request.
     """
-    llm = get_llm()
+    llm = get_llm(preferred_provider)
     tools = make_tools(db, actor, metrics_tracker=metrics_tracker)
     
     # Restoring persistent PostgreSQL memory

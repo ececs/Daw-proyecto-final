@@ -200,3 +200,5 @@ export interface AITicketStats {
   time_to_close_hours: number | null;
   estimated_cost_usd: number;
 }
+
+export type AIPreference = "auto" | "openai" | "google";

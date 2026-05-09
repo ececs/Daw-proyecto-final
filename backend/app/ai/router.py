@@ -54,6 +54,7 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
     current_ticket_id: Optional[str] = None
     selected_ticket_ids: Optional[List[str]] = None
+    preferred_provider: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +255,8 @@ async def chat(
         user_id=current_user.id,
         ticket_id=_resolve_ticket_id_for_chat(request),
         thread_id=thread_id,
+        primary_provider=ai_metrics_service.configured_primary_signature()[0] if (request.preferred_provider or "auto") == "auto" else request.preferred_provider,
+        primary_model="gpt-4o-mini" if request.preferred_provider == "openai" else ("gemini-2.5-flash" if request.preferred_provider == "google" else ai_metrics_service.configured_primary_signature()[1]),
         input_tokens=input_tokens,
     )
 
@@ -267,7 +270,13 @@ async def chat(
             estimated_input_tokens=input_tokens,
         )
         tracker.ai_run_id = ai_run.id
-        agent = build_agent(db, current_user, system_context=extra_context, metrics_tracker=tracker)
+        agent = build_agent(
+            db,
+            current_user,
+            system_context=extra_context,
+            metrics_tracker=tracker,
+            preferred_provider=request.preferred_provider,
+        )
     except Exception as e:
         error_msg = str(e)
         v_logger.error("AI Initialization Failed: %s", error_msg, exc_info=True)

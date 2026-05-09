@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Activity, CheckCircle2, AlertTriangle, XCircle, ChevronDown, BarChart3, Clock3, Search, ThumbsUp } from "lucide-react";
 import api from "@/lib/api";
-import { AIStatsSummary, AIStatus } from "@/types";
+import { AIStatsSummary, AIStatus, AIPreference } from "@/types";
+import { getAIPreference, setAIPreference } from "@/lib/aiPreference";
 
 const PROVIDER_LABELS: Record<string, string> = {
   google: "Google",
@@ -14,10 +15,12 @@ const PROVIDER_LABELS: Record<string, string> = {
 export function AIStatusButton() {
   const [status, setStatus] = useState<AIStatus | null>(null);
   const [stats, setStats] = useState<AIStatsSummary | null>(null);
+  const [preference, setPreference] = useState<AIPreference>("auto");
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setPreference(getAIPreference());
     Promise.all([api.get<AIStatus>("/ai/status"), api.get<AIStatsSummary>("/ai/stats")])
       .then(([statusRes, statsRes]) => {
         setStatus(statusRes.data);
@@ -51,6 +54,11 @@ export function AIStatusButton() {
   const hasError = !!status.last_error;
   const isHealthy = !hasError && status.model !== "unknown";
 
+  const handlePreferenceChange = (value: AIPreference) => {
+    setPreference(value);
+    setAIPreference(value);
+  };
+
   return (
     <div ref={ref} className="relative">
       <button
@@ -81,6 +89,19 @@ export function AIStatusButton() {
 
           {/* Model info */}
           <div className="px-4 py-3 space-y-2 text-xs border-b border-slate-100">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">Preferencia</span>
+              <select
+                value={preference}
+                onChange={(e) => handlePreferenceChange(e.target.value as AIPreference)}
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                aria-label="Preferencia de modelo IA"
+              >
+                <option value="auto">Automático</option>
+                <option value="openai">GPT-4o-mini</option>
+                <option value="google">Gemini 2.5 Flash</option>
+              </select>
+            </div>
             <Row label="Provider" value={PROVIDER_LABELS[status.provider] ?? status.provider} />
             <Row label="Model" value={status.model} />
             <Row

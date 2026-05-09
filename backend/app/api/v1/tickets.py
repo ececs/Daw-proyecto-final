@@ -245,6 +245,7 @@ async def get_diagnosis(
     ticket_ref: str,
     db: DB,
     current_user: CurrentUser,
+    preferred_provider: str | None = None,
 ):
     """Generate an AI diagnosis and suggested solution for a ticket (streamed)."""
     ticket = await ticket_service.resolve_ticket(db, ticket_ref)
@@ -255,6 +256,8 @@ async def get_diagnosis(
         surface="diagnosis",
         user_id=current_user.id,
         ticket_id=ticket.id,
+        primary_provider=ai_metrics_service.configured_primary_signature()[0] if (preferred_provider or "auto") == "auto" else preferred_provider,
+        primary_model="gpt-4o-mini" if preferred_provider == "openai" else ("gemini-2.5-flash" if preferred_provider == "google" else ai_metrics_service.configured_primary_signature()[1]),
         input_tokens=0,
     )
     ai_run = await ai_metrics_service.create_ai_run(
@@ -272,7 +275,12 @@ async def get_diagnosis(
         error_message: str | None = None
         yield f"data: {json.dumps({'type': 'session', 'ai_run_id': str(ai_run.id)})}\n\n"
         try:
-            async for event in ai_copilot_service.stream_ticket_diagnosis(db, ticket.id, tracker=tracker):
+            async for event in ai_copilot_service.stream_ticket_diagnosis(
+                db,
+                ticket.id,
+                tracker=tracker,
+                preferred_provider=preferred_provider,
+            ):
                 if event.get("type") == "error":
                     error_message = event.get("content")
                 yield f"data: {json.dumps(event)}\n\n"

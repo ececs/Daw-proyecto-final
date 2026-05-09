@@ -77,6 +77,8 @@ class AIRunTracker:
     ticket_id: uuid.UUID | None = None
     thread_id: str | None = None
     ai_run_id: uuid.UUID | None = None
+    primary_provider: str = field(default_factory=lambda: settings.AI_PROVIDER)
+    primary_model: str = field(default_factory=lambda: settings.AI_MODEL)
     provider: str = field(default_factory=lambda: settings.AI_PROVIDER)
     model: str = field(default_factory=lambda: settings.AI_MODEL)
     used_fallback: bool = False
@@ -93,8 +95,7 @@ class AIRunTracker:
         observed_provider, observed_model = detect_provider_and_model(event_name)
         self.provider = observed_provider
         self.model = observed_model
-        primary_provider, primary_model = configured_primary_signature()
-        if observed_provider != primary_provider or observed_model != primary_model:
+        if observed_provider != self.primary_provider or observed_model != self.primary_model:
             self.used_fallback = True
 
     def add_tool_action(self) -> None:

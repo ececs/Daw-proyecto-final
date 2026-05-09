@@ -26,6 +26,7 @@ from app.ai.tools import make_tools
 from app.ai import observability
 from app.ai.checkpoint import get_checkpointer
 from app.ai.state import AgentState
+from app.services.ai_metrics_service import AIRunTracker
 
 logger = logging.getLogger(__name__)
 _llm_singleton: BaseChatModel | None = None
@@ -176,12 +177,17 @@ def _build_llm() -> BaseChatModel:
     return primary_llm
 
 
-def build_agent(db: AsyncSession, actor: User, system_context: str = ""):
+def build_agent(
+    db: AsyncSession,
+    actor: User,
+    system_context: str = "",
+    metrics_tracker: AIRunTracker | None = None,
+):
     """
     Build a ReAct agent for a single request.
     """
     llm = get_llm()
-    tools = make_tools(db, actor)
+    tools = make_tools(db, actor, metrics_tracker=metrics_tracker)
     
     # Restoring persistent PostgreSQL memory
     checkpointer = get_checkpointer()

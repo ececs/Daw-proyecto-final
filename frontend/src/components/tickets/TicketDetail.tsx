@@ -17,11 +17,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, Clock, Paperclip, Trash2, Download, MessageSquare, Send, Loader2, Sparkles, RefreshCw, Globe, ExternalLink, Info, ChevronDown, ChevronUp, History,
+  ArrowLeft, Clock, Paperclip, Trash2, Download, MessageSquare, Send, Loader2, Sparkles, RefreshCw, Globe, ExternalLink, Info, ChevronDown, ChevronUp, History, BarChart3, ThumbsUp, ThumbsDown,
 } from "lucide-react";
 import api from "@/lib/api";
 import {
-  Ticket, Comment, Attachment, TicketStatus, TicketPriority, User, TicketHistory,
+  Ticket, Comment, Attachment, TicketStatus, TicketPriority, User, TicketHistory, AITicketStats,
 } from "@/types";
 import { getAuthToken } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
@@ -93,11 +93,16 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
   // AI Diagnosis state
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [aiDiagnosis, setAiDiagnosis] = useState<string | null>(null);
+  const [aiDiagnosisRunId, setAiDiagnosisRunId] = useState<string | null>(null);
+  const [isSubmittingDiagnosisFeedback, setIsSubmittingDiagnosisFeedback] = useState(false);
+  const [diagnosisFeedback, setDiagnosisFeedback] = useState<boolean | null>(null);
   const [showDiagnosis, setShowDiagnosis] = useState(false);
   const [showExtracted, setShowExtracted] = useState(false);
   const [extractedContent, setExtractedContent] = useState<string | null>(null);
   const [isRefreshingWeb, setIsRefreshingWeb] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [aiTicketStats, setAiTicketStats] = useState<AITicketStats | null>(null);
+  const [isLoadingAITicketStats, setIsLoadingAITicketStats] = useState(false);
   const [confirmDeleteAttachmentId, setConfirmDeleteAttachmentId] = useState<string | null>(null);
 
 
@@ -119,6 +124,10 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
 
   useEffect(() => {
     fetchData();
+  }, [ticketId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    void fetchAITicketStats();
   }, [ticketId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Real-time refresh listener (WebSockets)
@@ -164,6 +173,19 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
       );
     } finally {
       if (!background) setIsLoading(false);
+    }
+  };
+
+  const fetchAITicketStats = async () => {
+    if (!ticketId || ticketId === "None" || ticketId === "undefined") return;
+    setIsLoadingAITicketStats(true);
+    try {
+      const { data } = await api.get<AITicketStats>(`/ai/stats/tickets/${ticketId}`);
+      setAiTicketStats(data);
+    } catch (err) {
+      console.error("Failed to load AI ticket stats", err);
+    } finally {
+      setIsLoadingAITicketStats(false);
     }
   };
 
@@ -324,6 +346,8 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
 
     setIsDiagnosing(true);
     setAiDiagnosis(""); // Initialize as empty string for streaming
+    setAiDiagnosisRunId(null);
+    setDiagnosisFeedback(null);
     setShowDiagnosis(true);
     
     try {
@@ -342,18 +366,56 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
       
       if (!reader) throw new Error("ReadableStream not supported");
 
+      let buffer = "";
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        setAiDiagnosis((prev) => (prev || "") + chunk);
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const line = part.replace(/^data: /, "").trim();
+          if (!line) continue;
+          try {
+            const event = JSON.parse(line) as { type: string; content?: string; ai_run_id?: string };
+            if (event.type === "session" && event.ai_run_id) {
+              setAiDiagnosisRunId(event.ai_run_id);
+            } else if (event.type === "token" && event.content) {
+              setAiDiagnosis((prev) => (prev || "") + event.content);
+            } else if (event.type === "error" && event.content) {
+              setAiDiagnosis(event.content);
+            }
+          } catch {
+            // Ignore malformed chunks
+          }
+        }
       }
+      void fetchAITicketStats();
     } catch (err: unknown) {
       console.error("AI Diagnosis failed", err);
       setAiDiagnosis("*(Error: Could not connect to the AI service for real-time diagnosis)*");
     } finally {
       setIsDiagnosing(false);
+    }
+  };
+
+  const submitDiagnosisFeedback = async (helped: boolean) => {
+    if (!aiDiagnosisRunId || isSubmittingDiagnosisFeedback) return;
+    setIsSubmittingDiagnosisFeedback(true);
+    try {
+      await api.post("/ai/feedback", {
+        ai_run_id: aiDiagnosisRunId,
+        helped,
+        label: helped ? "helped_close" : "did_not_help",
+      });
+      setDiagnosisFeedback(helped);
+      void fetchAITicketStats();
+    } catch (error) {
+      console.error("Failed to submit diagnosis feedback", error);
+    } finally {
+      setIsSubmittingDiagnosisFeedback(false);
     }
   };
 
@@ -514,6 +576,35 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
               <p className="text-sm text-slate-700 leading-relaxed italic whitespace-pre-wrap">
                 {aiDiagnosis}
               </p>
+              {aiDiagnosisRunId && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] text-slate-500">¿Te ayudó este diagnóstico?</span>
+                  <button
+                    onClick={() => submitDiagnosisFeedback(true)}
+                    disabled={diagnosisFeedback !== null || isSubmittingDiagnosisFeedback}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                      diagnosisFeedback === true
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-white text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+                    } disabled:opacity-70`}
+                  >
+                    {isSubmittingDiagnosisFeedback ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsUp className="w-3 h-3" />}
+                    Ayudó
+                  </button>
+                  <button
+                    onClick={() => submitDiagnosisFeedback(false)}
+                    disabled={diagnosisFeedback !== null || isSubmittingDiagnosisFeedback}
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                      diagnosisFeedback === false
+                        ? "bg-rose-100 text-rose-700"
+                        : "bg-white text-slate-600 hover:bg-rose-50 hover:text-rose-700"
+                    } disabled:opacity-70`}
+                  >
+                    {isSubmittingDiagnosisFeedback ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsDown className="w-3 h-3" />}
+                    No ayudó
+                  </button>
+                </div>
+              )}
               <div className="mt-3 flex justify-end">
                 <button 
                   onClick={() => setShowDiagnosis(false)}
@@ -524,6 +615,58 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
               </div>
             </div>
           )}
+
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                <BarChart3 className="w-4 h-4 text-blue-500" /> Impacto de IA en este ticket
+              </h2>
+              {isLoadingAITicketStats && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
+            </div>
+            {aiTicketStats ? (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Diagnósticos</p>
+                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.diagnosis_runs}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Chats ligados</p>
+                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.chat_runs}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Consultas RAG</p>
+                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.rag_queries_count}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Hit rate RAG</p>
+                  <p className="text-sm font-semibold text-slate-800">{Math.round(aiTicketStats.rag_hit_rate * 100)}%</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Feedback positivo</p>
+                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.positive_feedback_count}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-slate-500">Coste estimado</p>
+                  <p className="text-sm font-semibold text-slate-800">${aiTicketStats.estimated_cost_usd.toFixed(4)}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Todavía no hay actividad de IA asociada a este ticket.</p>
+            )}
+            {aiTicketStats && (
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                <span>
+                  Último uso: {aiTicketStats.last_ai_used_at ? formatDateTime(aiTicketStats.last_ai_used_at) : "—"}
+                </span>
+                <span>
+                  Tiempo hasta cierre: {aiTicketStats.time_to_close_hours !== null ? `${aiTicketStats.time_to_close_hours} h` : "Abierto"}
+                </span>
+                <span>
+                  Ayuda global: {aiTicketStats.helped === null ? "Sin feedback" : aiTicketStats.helped ? "Positiva" : "Negativa"}
+                </span>
+              </div>
+            )}
+          </div>
 
           {/* Client URL Context */}
           <div className="bg-white rounded-xl border border-slate-200 p-4">

@@ -31,12 +31,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.dependencies import CurrentUser, DB
+from app.ai import observability
 from app.models.ticket import Ticket, TicketPriority, TicketStatus
 from app.models.user import User
 from app.schemas.ticket import TicketCreate, TicketListResponse, TicketOut, TicketUpdate
 from app.services.cache_service import cache_get, cache_set, cache_invalidate_prefix
 from app.services.embedding_service import generate_ticket_embedding
-from app.services import ticket_service, notification_service, ai_copilot_service, scraping_service
+from app.services import ticket_service, notification_service, ai_copilot_service, scraping_service, ai_metrics_service
 from app.schemas.websocket import WSMessageType
 from app.models.knowledge_chunk import KnowledgeChunk
 
@@ -249,8 +250,45 @@ async def get_diagnosis(
     ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    observability.increment_diagnosis()
+    tracker = ai_metrics_service.AIRunTracker(
+        surface="diagnosis",
+        user_id=current_user.id,
+        ticket_id=ticket.id,
+        input_tokens=0,
+    )
+    ai_run = await ai_metrics_service.create_ai_run(
+        db,
+        user_id=current_user.id,
+        surface="diagnosis",
+        ticket_id=ticket.id,
+        thread_id=None,
+        estimated_input_tokens=0,
+    )
+    tracker.ai_run_id = ai_run.id
+
+    async def diagnosis_stream():
+        success = False
+        error_message: str | None = None
+        yield f"data: {json.dumps({'type': 'session', 'ai_run_id': str(ai_run.id)})}\n\n"
+        try:
+            async for event in ai_copilot_service.stream_ticket_diagnosis(db, ticket.id, tracker=tracker):
+                if event.get("type") == "error":
+                    error_message = event.get("content")
+                yield f"data: {json.dumps(event)}\n\n"
+            if error_message is None:
+                success = True
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        finally:
+            await ai_metrics_service.finalize_ai_run(
+                db,
+                ai_run,
+                tracker,
+                success=success,
+                error_message=error_message,
+            )
     return StreamingResponse(
-        ai_copilot_service.stream_ticket_diagnosis(db, ticket.id),
+        diagnosis_stream(),
         media_type="text/event-stream"
     )
 

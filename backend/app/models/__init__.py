@@ -5,6 +5,8 @@ from .attachment import Attachment
 from .notification import Notification, NotificationType
 from .knowledge_chunk import KnowledgeChunk
 from .ticket_history import TicketHistory
+from .ai_run import AIRun
+from .ai_feedback import AIFeedback
 
 __all__ = [
     "User",
@@ -14,4 +16,6 @@ __all__ = [
     "Notification", "NotificationType",
     "KnowledgeChunk",
     "TicketHistory",
+    "AIRun",
+    "AIFeedback",
 ]

@@ -1,22 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, CheckCircle2, AlertTriangle, XCircle, ChevronDown } from "lucide-react";
+import { Activity, CheckCircle2, AlertTriangle, XCircle, ChevronDown, BarChart3, Clock3, Search, ThumbsUp } from "lucide-react";
 import api from "@/lib/api";
-
-interface AIStatus {
-  provider: string;
-  model: string;
-  fallback_available: boolean;
-  fallback_model: string | null;
-  last_error: string | null;
-  last_error_at: string | null;
-  action_count: number;
-  chat_count: number;
-  diagnoses_count: number;
-  rag_queries_count: number;
-  rag_hits_count: number;
-}
+import { AIStatsSummary, AIStatus } from "@/types";
 
 const PROVIDER_LABELS: Record<string, string> = {
   google: "Google",
@@ -26,20 +13,27 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 export function AIStatusButton() {
   const [status, setStatus] = useState<AIStatus | null>(null);
+  const [stats, setStats] = useState<AIStatsSummary | null>(null);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.get<AIStatus>("/ai/status")
-      .then((r) => setStatus(r.data))
+    Promise.all([api.get<AIStatus>("/ai/status"), api.get<AIStatsSummary>("/ai/stats")])
+      .then(([statusRes, statsRes]) => {
+        setStatus(statusRes.data);
+        setStats(statsRes.data);
+      })
       .catch(() => {});
   }, []);
 
   // Refresh on open so count is fresh
   const handleOpen = () => {
     setOpen((v) => !v);
-    api.get<AIStatus>("/ai/status")
-      .then((r) => setStatus(r.data))
+    Promise.all([api.get<AIStatus>("/ai/status"), api.get<AIStatsSummary>("/ai/stats")])
+      .then(([statusRes, statsRes]) => {
+        setStatus(statusRes.data);
+        setStats(statsRes.data);
+      })
       .catch(() => {});
   };
 
@@ -75,7 +69,7 @@ export function AIStatusButton() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-lg border border-slate-200 z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-slate-200 z-50 overflow-hidden">
           {/* Header */}
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">AI Status</p>
@@ -97,6 +91,8 @@ export function AIStatusButton() {
                   : <span className="text-slate-400">not configured</span>
               }
             />
+            <Row label="Fallback used" value={<span className="font-mono">{status.fallback_count}</span>} />
+            <Row label="Last surface" value={status.last_surface ?? "—"} />
           </div>
 
           {/* Usage stats */}
@@ -105,6 +101,8 @@ export function AIStatusButton() {
             <Row label="Chat messages" value={<span className="font-mono">{status.chat_count}</span>} />
             <Row label="AI diagnoses" value={<span className="font-mono">{status.diagnoses_count}</span>} />
             <Row label="Tool actions" value={<span className="font-mono">{status.action_count}</span>} />
+            <Row label="Avg latency" value={<span className="font-mono">{status.avg_latency_ms ? `${status.avg_latency_ms} ms` : "—"}</span>} />
+            <Row label="Success / error" value={<span className="font-mono">{status.success_count} / {status.error_count}</span>} />
             <Row
               label="RAG queries"
               value={
@@ -118,7 +116,20 @@ export function AIStatusButton() {
                 </span>
               }
             />
+            <Row label="Last RAG source" value={<span className="font-mono">{status.last_rag_source}</span>} />
           </div>
+
+          {stats && (
+            <div className="px-4 py-3 space-y-2 text-xs border-t border-slate-100">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Historical stats</p>
+              <Metric icon={BarChart3} label="Total runs" value={stats.total_runs} />
+              <Metric icon={Clock3} label="Close with IA" value={stats.tickets_closed_with_ai} />
+              <Metric icon={Search} label="RAG hit rate" value={`${Math.round(stats.rag_hit_rate * 100)}%`} />
+              <Metric icon={ThumbsUp} label="Helped" value={`${Math.round(stats.helped_rate * 100)}%`} />
+              <Row label="Total cost" value={`$${stats.total_estimated_cost_usd.toFixed(4)}`} />
+              <Row label="Cost / run" value={`$${stats.avg_cost_per_run_usd.toFixed(4)}`} />
+            </div>
+          )}
 
           {/* Last error */}
           {hasError && (
@@ -134,6 +145,26 @@ export function AIStatusButton() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function Metric({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof Activity;
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-lg bg-slate-50 px-2.5 py-1.5">
+      <span className="flex items-center gap-1 text-slate-500">
+        <Icon className="w-3.5 h-3.5" />
+        {label}
+      </span>
+      <span className="text-slate-700 font-medium">{value}</span>
     </div>
   );
 }

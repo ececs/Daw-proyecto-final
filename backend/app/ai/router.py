@@ -28,7 +28,7 @@ import uuid
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
@@ -37,6 +37,9 @@ from app.core.dependencies import CurrentUser, DB
 from app.ai.agent import build_agent
 from app.ai.checkpoint import get_checkpointer
 from app.ai import observability
+from app.models.ai_run import AIRun
+from app.schemas.ai_metrics import AIFeedbackCreate
+from app.services import ai_metrics_service, ticket_service
 
 router = APIRouter(prefix="/ai", tags=["AI Agent"])
 
@@ -57,13 +60,20 @@ class ChatRequest(BaseModel):
 # Shared SSE streaming helper (Single Responsibility)
 # ---------------------------------------------------------------------------
 
-async def _agent_sse_stream(agent, initial_state, config: dict, thread_id: str):
+async def _agent_sse_stream(
+    agent,
+    initial_state,
+    config: dict,
+    thread_id: str,
+    tracker: ai_metrics_service.AIRunTracker,
+    ai_run_id: str,
+):
     """
     Core SSE generator shared by /chat and /resume.
     Streams LangGraph agent events and detects interrupts after the stream ends.
     """
     v_logger = logging.getLogger("uvicorn.error")
-    yield f"data: {json.dumps({'type': 'session', 'thread_id': thread_id})}\n\n"
+    yield f"data: {json.dumps({'type': 'session', 'thread_id': thread_id, 'ai_run_id': ai_run_id})}\n\n"
     yield f"data: {json.dumps({'type': 'token', 'content': ' '})}\n\n"
 
     try:
@@ -76,6 +86,7 @@ async def _agent_sse_stream(agent, initial_state, config: dict, thread_id: str):
 
             if kind == "on_chat_model_start":
                 m_name = event.get("name", "")
+                tracker.register_model(m_name)
                 if "Google" in m_name:
                     active_model = "Gemini"
                 elif "OpenAI" in m_name:
@@ -90,6 +101,7 @@ async def _agent_sse_stream(agent, initial_state, config: dict, thread_id: str):
                     if not debug_prefix_sent:
                         content = f"{active_model}: " + content
                         debug_prefix_sent = True
+                    tracker.append_output(content)
                     yield f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
 
             elif kind == "on_tool_start":
@@ -97,6 +109,7 @@ async def _agent_sse_stream(agent, initial_state, config: dict, thread_id: str):
 
             elif kind == "on_tool_end":
                 observability.increment_action()
+                tracker.add_tool_action()
                 tool_name = event.get("name", "")
                 raw_output = event.get("data", {}).get("output", "")
                 tool_output = str(raw_output.content) if hasattr(raw_output, "content") else str(raw_output)
@@ -124,7 +137,7 @@ async def _agent_sse_stream(agent, initial_state, config: dict, thread_id: str):
     except Exception as e:
         error_msg = str(e)
         v_logger.error("SSE stream error: %s", error_msg, exc_info=True)
-        observability.record_error(error_msg)
+        tracker.error_message = error_msg
         friendly = _make_friendly_error(error_msg)
         yield f"data: {json.dumps({'type': 'error', 'content': friendly})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -136,6 +149,20 @@ def _make_friendly_error(error_msg: str) -> str:
     if "api_key" in error_msg.lower() or "401" in error_msg:
         return "*(Sistema: Error de configuración de clave de IA.)*"
     return error_msg
+
+
+def _resolve_ticket_id_for_chat(request: ChatRequest) -> uuid.UUID | None:
+    if request.current_ticket_id:
+        try:
+            return uuid.UUID(request.current_ticket_id)
+        except ValueError:
+            return None
+    if request.selected_ticket_ids and len(request.selected_ticket_ids) == 1:
+        try:
+            return uuid.UUID(request.selected_ticket_ids[0])
+        except ValueError:
+            return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +202,7 @@ async def chat(
 ):
     checkpointer = get_checkpointer()
     thread_id = request.thread_id or str(current_user.id)
+    ai_run: AIRun | None = None
 
     observability.increment_chat()
     v_logger = logging.getLogger("uvicorn.error")
@@ -220,12 +248,38 @@ async def chat(
             v_logger.warning("AI Context: failed to fetch selected tickets: %s", e)
 
     extra_context = "\n\n" + "\n\n---\n\n".join(context_parts) if context_parts else ""
+    input_tokens = sum(ai_metrics_service.estimate_tokens(msg.content) for msg in request.messages)
+    tracker = ai_metrics_service.AIRunTracker(
+        surface="chat",
+        user_id=current_user.id,
+        ticket_id=_resolve_ticket_id_for_chat(request),
+        thread_id=thread_id,
+        input_tokens=input_tokens,
+    )
 
     try:
-        agent = build_agent(db, current_user, system_context=extra_context)
+        ai_run = await ai_metrics_service.create_ai_run(
+            db,
+            user_id=current_user.id,
+            surface="chat",
+            ticket_id=tracker.ticket_id,
+            thread_id=thread_id,
+            estimated_input_tokens=input_tokens,
+        )
+        tracker.ai_run_id = ai_run.id
+        agent = build_agent(db, current_user, system_context=extra_context, metrics_tracker=tracker)
     except Exception as e:
         error_msg = str(e)
         v_logger.error("AI Initialization Failed: %s", error_msg, exc_info=True)
+        tracker.error_message = error_msg
+        if ai_run is not None:
+            await ai_metrics_service.finalize_ai_run(
+                db,
+                ai_run,
+                tracker,
+                success=False,
+                error_message=error_msg,
+            )
 
         async def error_generator():
             yield f"data: {json.dumps({'type': 'error', 'content': f'*(Error de Configuración: {error_msg})*'})}\n\n"
@@ -257,8 +311,17 @@ async def chat(
         v_logger.info("Memory Check: Thread %s has %d messages", thread_id, history_count)
 
     async def event_stream():
-        async for chunk in _agent_sse_stream(agent, initial_state, config, thread_id):
-            yield chunk
+        try:
+            async for chunk in _agent_sse_stream(agent, initial_state, config, thread_id, tracker, str(ai_run.id)):
+                yield chunk
+        finally:
+            await ai_metrics_service.finalize_ai_run(
+                db,
+                ai_run,
+                tracker,
+                success=tracker.error_message is None,
+                error_message=tracker.error_message,
+            )
 
     return StreamingResponse(
         event_stream(),
@@ -274,3 +337,40 @@ async def get_ai_status(current_user: CurrentUser):
     provider, active model, fallback availability, last error, and action count.
     """
     return observability.get_status()
+
+
+@router.get("/stats")
+async def get_ai_stats(db: DB, current_user: CurrentUser):
+    return await ai_metrics_service.get_stats_summary(db)
+
+
+@router.get("/stats/tickets/{ticket_ref}")
+async def get_ticket_ai_stats(ticket_ref: str, db: DB, current_user: CurrentUser):
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    return await ai_metrics_service.get_ticket_stats(db, ticket.id)
+
+
+@router.post("/feedback")
+async def create_ai_feedback(payload: AIFeedbackCreate, db: DB, current_user: CurrentUser):
+    run = await db.get(AIRun, payload.ai_run_id)
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI run not found")
+    feedback = await ai_metrics_service.create_feedback(
+        db,
+        ai_run_id=payload.ai_run_id,
+        user_id=current_user.id,
+        helped=payload.helped,
+        label=payload.label,
+        notes=payload.notes,
+    )
+    return {
+        "id": str(feedback.id),
+        "ai_run_id": str(feedback.ai_run_id),
+        "user_id": str(feedback.user_id) if feedback.user_id else None,
+        "helped": feedback.helped,
+        "label": feedback.label,
+        "notes": feedback.notes,
+        "created_at": feedback.created_at.isoformat(),
+    }

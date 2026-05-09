@@ -21,7 +21,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Send, Bot, Loader2, Wrench, RotateCcw } from "lucide-react";
+import { X, Send, Bot, Loader2, Wrench, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useSelectionStore } from "@/stores/useSelectionStore";
 import { ChatMessage } from "@/types";
@@ -48,6 +48,7 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
   ]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [feedbackSubmittingId, setFeedbackSubmittingId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isRequestingDelete, setIsRequestingDelete] = useState(false);
   const [deleteQueue, setDeleteQueue] = useState<PendingDelete[]>([]);
@@ -187,14 +188,25 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
               name?: string;
               result?: string;
               thread_id?: string;
+              ai_run_id?: string;
               ticket_id?: string;
               ticket_title?: string;
             };
 
-            if (event.type === "session" && event.thread_id) {
-              // Confirm/update thread_id from server (in case it was generated server-side)
-              threadIdRef.current = event.thread_id as string;
-              localStorage.setItem("ai_thread_id", event.thread_id as string);
+            if (event.type === "session") {
+              if (event.thread_id) {
+                threadIdRef.current = event.thread_id as string;
+                localStorage.setItem("ai_thread_id", event.thread_id as string);
+              }
+              if (event.ai_run_id) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, ai_run_id: event.ai_run_id, feedback_submitted: false, feedback_helped: null }
+                      : m
+                  )
+                );
+              }
             } else if (event.type === "token" && event.content) {
               // Append text token to the assistant message
               setMessages((prev) =>
@@ -380,6 +392,29 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
     }
   };
 
+  const submitFeedback = useCallback(async (messageId: string, aiRunId: string, helped: boolean) => {
+    if (feedbackSubmittingId) return;
+    setFeedbackSubmittingId(messageId);
+    try {
+      await api.post("/ai/feedback", {
+        ai_run_id: aiRunId,
+        helped,
+        label: helped ? "helpful" : "not_helpful",
+      });
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === messageId
+            ? { ...message, feedback_submitted: true, feedback_helped: helped }
+            : message
+        )
+      );
+    } catch (error) {
+      console.error("Failed to submit AI feedback", error);
+    } finally {
+      setFeedbackSubmittingId(null);
+    }
+  }, [feedbackSubmittingId]);
+
   return (
     <>
     <div className="fixed inset-x-3 bottom-28 top-4 z-[200] flex flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl animate-in slide-in-from-bottom-4 fade-in sm:inset-x-auto sm:top-auto sm:right-4 sm:bottom-4 sm:h-[560px] sm:w-[380px]">
@@ -454,6 +489,35 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
                         <span className="truncate">{action}</span>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {msg.role === "assistant" && msg.ai_run_id && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      onClick={() => submitFeedback(msg.id, msg.ai_run_id!, true)}
+                      disabled={msg.feedback_submitted || feedbackSubmittingId === msg.id}
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition-colors ${
+                        msg.feedback_helped === true
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+                      } disabled:opacity-70`}
+                    >
+                      {feedbackSubmittingId === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsUp className="w-3 h-3" />}
+                      Ayudó
+                    </button>
+                    <button
+                      onClick={() => submitFeedback(msg.id, msg.ai_run_id!, false)}
+                      disabled={msg.feedback_submitted || feedbackSubmittingId === msg.id}
+                      className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] transition-colors ${
+                        msg.feedback_helped === false
+                          ? "bg-rose-100 text-rose-700"
+                          : "bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-700"
+                      } disabled:opacity-70`}
+                    >
+                      {feedbackSubmittingId === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsDown className="w-3 h-3" />}
+                      No ayudó
+                    </button>
                   </div>
                 )}
               </div>

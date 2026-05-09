@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ticket import Ticket, TicketStatus, TicketPriority
 from app.models.user import User
+from app.services.ai_metrics_service import AIRunTracker
 
 from app.services import ticket_service, notification_service, knowledge_service, comment_service, scraping_service, history_service
 
@@ -108,7 +109,7 @@ class DeleteTicketSchema(BaseModel):
 
 # --- Tool Factory ---
 
-def make_tools(db: AsyncSession, actor: User) -> List:
+def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | None = None) -> List:
     """
     Returns a collection of validated tools for the AI agent.
     """
@@ -298,9 +299,13 @@ def make_tools(db: AsyncSession, actor: User) -> List:
         """Query the knowledge base."""
         async with lock:
             try:
-                chunks = await knowledge_service.search(db, query, k=k)
-                from app.ai import observability
-                observability.increment_rag_query(had_results=bool(chunks))
+                result = await knowledge_service.search_with_stats(db, query, k=k)
+                chunks = [chunk.content for chunk in result.chunks]
+                if metrics_tracker:
+                    metrics_tracker.record_rag(1, result.hits, result.source_type)
+                else:
+                    from app.ai import observability
+                    observability.increment_rag_query(had_results=bool(chunks))
                 return "\n\n".join(chunks) if chunks else "No information found."
             except Exception as e:
                 return f"Error: {e}"
@@ -314,7 +319,7 @@ def make_tools(db: AsyncSession, actor: User) -> List:
             try:
                 from app.services import ai_copilot_service
                 tid = uuid.UUID(ticket_id)
-                diagnosis = await ai_copilot_service.get_ticket_diagnosis(db, tid)
+                diagnosis = await ai_copilot_service.get_ticket_diagnosis(db, tid, tracker=metrics_tracker)
                 return diagnosis
             except Exception as e:
                 return f"Error al generar diagnóstico: {e}"

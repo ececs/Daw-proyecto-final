@@ -29,6 +29,15 @@ class _AIState:
     diagnoses_count: int = 0    # AI copilot diagnoses streamed
     rag_queries_count: int = 0  # search_knowledge tool calls
     rag_hits_count: int = 0     # searches that returned ≥1 chunk
+    fallback_count: int = 0
+    success_count: int = 0
+    error_count: int = 0
+    last_latency_ms: Optional[int] = None
+    latency_total_ms: int = 0
+    latency_samples: int = 0
+    avg_latency_ms: Optional[float] = None
+    last_surface: Optional[str] = None
+    last_rag_source: str = "none"
 
 
 _state = _AIState()
@@ -59,12 +68,14 @@ def increment_chat() -> None:
     """Called on each POST /ai/chat request."""
     with _lock:
         _state.chat_count += 1
+        _state.last_surface = "chat"
 
 
 def increment_diagnosis() -> None:
     """Called when a streaming AI diagnosis is started."""
     with _lock:
         _state.diagnoses_count += 1
+        _state.last_surface = "diagnosis"
 
 
 def increment_rag_query(had_results: bool) -> None:
@@ -75,11 +86,39 @@ def increment_rag_query(had_results: bool) -> None:
             _state.rag_hits_count += 1
 
 
-def record_error(message: str) -> None:
+def record_rag(queries: int, hits: int, source: str) -> None:
+    with _lock:
+        _state.rag_queries_count += max(0, queries)
+        _state.rag_hits_count += max(0, hits)
+        _state.last_rag_source = source or "none"
+
+
+def record_fallback() -> None:
+    with _lock:
+        _state.fallback_count += 1
+
+
+def record_success(surface: str, latency_ms: Optional[int], rag_source: Optional[str] = None) -> None:
+    with _lock:
+        _state.success_count += 1
+        _state.last_surface = surface
+        if rag_source:
+            _state.last_rag_source = rag_source
+        if latency_ms is not None:
+            _state.last_latency_ms = latency_ms
+            _state.latency_total_ms += latency_ms
+            _state.latency_samples += 1
+            _state.avg_latency_ms = round(_state.latency_total_ms / _state.latency_samples, 2)
+
+
+def record_error(message: str, surface: Optional[str] = None) -> None:
     """Store the most recent error message with a UTC timestamp."""
     with _lock:
+        _state.error_count += 1
         _state.last_error = message[:300]
         _state.last_error_at = datetime.now(timezone.utc).isoformat()
+        if surface:
+            _state.last_surface = surface
 
 
 def get_status() -> dict:
@@ -97,4 +136,11 @@ def get_status() -> dict:
             "diagnoses_count": _state.diagnoses_count,
             "rag_queries_count": _state.rag_queries_count,
             "rag_hits_count": _state.rag_hits_count,
+            "fallback_count": _state.fallback_count,
+            "success_count": _state.success_count,
+            "error_count": _state.error_count,
+            "last_latency_ms": _state.last_latency_ms,
+            "avg_latency_ms": _state.avg_latency_ms,
+            "last_surface": _state.last_surface,
+            "last_rag_source": _state.last_rag_source,
         }

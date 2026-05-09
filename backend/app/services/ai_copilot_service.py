@@ -19,11 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.ticket import Ticket
 from app.models.comment import Comment
 from app.ai.agent import get_llm
-from app.services.knowledge_service import search as knowledge_search
+from app.services.ai_metrics_service import AIRunTracker, estimate_tokens
+from app.services.knowledge_service import search_with_stats
 
 logger = logging.getLogger(__name__)
 
-async def _prepare_diagnosis_context(db: AsyncSession, ticket_id: uuid.UUID):
+async def _prepare_diagnosis_context(
+    db: AsyncSession, ticket_id: uuid.UUID, tracker: AIRunTracker | None = None
+):
     """
     Helper to fetch and format all context needed for diagnosis.
     """
@@ -58,15 +61,18 @@ async def _prepare_diagnosis_context(db: AsyncSession, ticket_id: uuid.UUID):
     rag_text = "No specific information found in the knowledge base."
     
     try:
-        global_task = knowledge_search(db, query=search_query, k=2)
-        ticket_web_task = knowledge_search(db, query=search_query, k=3, ticket_id=str(ticket_id))
+        global_task = search_with_stats(db, query=search_query, k=2)
+        ticket_web_task = search_with_stats(db, query=search_query, k=3, ticket_id=str(ticket_id))
         global_ctx, web_ctx = await asyncio.gather(global_task, ticket_web_task)
         
         all_context = []
-        if web_ctx:
-            all_context.append("CLIENT WEB CONTEXT:\n" + "\n".join(web_ctx))
-        if global_ctx:
-            all_context.append("GLOBAL / HISTORICAL KNOWLEDGE:\n" + "\n".join(global_ctx))
+        if tracker:
+            tracker.record_rag(1, web_ctx.hits, web_ctx.source_type)
+            tracker.record_rag(1, global_ctx.hits, global_ctx.source_type)
+        if web_ctx.chunks:
+            all_context.append("CLIENT WEB CONTEXT:\n" + "\n".join(chunk.content for chunk in web_ctx.chunks))
+        if global_ctx.chunks:
+            all_context.append("GLOBAL / HISTORICAL KNOWLEDGE:\n" + "\n".join(chunk.content for chunk in global_ctx.chunks))
         if all_context:
             rag_text = "\n\n---\n\n".join(all_context)
     except Exception as rag_err:
@@ -99,12 +105,14 @@ async def _prepare_diagnosis_context(db: AsyncSession, ticket_id: uuid.UUID):
     return system_prompt, user_prompt, ticket
 
 
-async def get_ticket_diagnosis(db: AsyncSession, ticket_id: uuid.UUID) -> str:
+async def get_ticket_diagnosis(
+    db: AsyncSession, ticket_id: uuid.UUID, tracker: AIRunTracker | None = None
+) -> str:
     """
     Non-streaming version of diagnosis.
     """
     try:
-        sys_p, user_p, _ = await _prepare_diagnosis_context(db, ticket_id)
+        sys_p, user_p, _ = await _prepare_diagnosis_context(db, ticket_id, tracker=tracker)
         if not sys_p:
             return "Error: Ticket not found."
 
@@ -113,31 +121,48 @@ async def get_ticket_diagnosis(db: AsyncSession, ticket_id: uuid.UUID) -> str:
             {"role": "system", "content": sys_p},
             {"role": "user", "content": user_p}
         ])
+        if tracker:
+            tracker.input_tokens += estimate_tokens(sys_p) + estimate_tokens(user_p)
+            tracker.append_output(response.content if isinstance(response.content, str) else str(response.content))
         return response.content
     except Exception as e:
         logger.error(f"AI Co-pilot Error: {str(e)}", exc_info=True)
         return f"*(Error interno del Co-pilot: {str(e)})*"
 
 
-async def stream_ticket_diagnosis(db: AsyncSession, ticket_id: uuid.UUID):
+async def stream_ticket_diagnosis(
+    db: AsyncSession, ticket_id: uuid.UUID, tracker: AIRunTracker | None = None
+):
     """
     Async generator that yields diagnosis tokens for real-time streaming.
     """
-    from app.ai import observability
-    observability.increment_diagnosis()
     try:
-        sys_p, user_p, _ = await _prepare_diagnosis_context(db, ticket_id)
+        sys_p, user_p, _ = await _prepare_diagnosis_context(db, ticket_id, tracker=tracker)
         if not sys_p:
-            yield "Error: Ticket no encontrado."
+            yield {"type": "error", "content": "Ticket no encontrado."}
             return
 
         llm = get_llm()
-        async for chunk in llm.astream([
+        payload = [
             {"role": "system", "content": sys_p},
             {"role": "user", "content": user_p}
-        ]):
-            if chunk.content:
-                yield chunk.content
+        ]
+        if tracker:
+            tracker.input_tokens += estimate_tokens(sys_p) + estimate_tokens(user_p)
+
+        async for event in llm.astream_events(payload, version="v2"):
+            kind = event["event"]
+            if kind == "on_chat_model_start" and tracker:
+                tracker.register_model(event.get("name"))
+            elif kind == "on_chat_model_stream":
+                chunk = event["data"]["chunk"]
+                if chunk.content:
+                    text = str(chunk.content)
+                    if tracker:
+                        tracker.append_output(text)
+                    yield {"type": "token", "content": text}
     except Exception as e:
         logger.error(f"AI Co-pilot Stream Error: {str(e)}", exc_info=True)
-        yield f"*(Error interno en el flujo del Co-pilot: {str(e)})*"
+        if tracker:
+            tracker.error_message = str(e)
+        yield {"type": "error", "content": f"*(Error interno en el flujo del Co-pilot: {str(e)})*"}

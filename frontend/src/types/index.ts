@@ -116,6 +116,9 @@ export interface ChatMessage {
   content: string;
   actions?: string[]; // Actions the AI performed (e.g., "Changed ticket #1 status to closed")
   created_at: string;
+  ai_run_id?: string;
+  feedback_helped?: boolean | null;
+  feedback_submitted?: boolean;
 }
 
 // ─── Ticket History ──────────────────────────────────────────────────────────
@@ -141,4 +144,59 @@ export interface TicketFilters {
   size?: number;
   sort_by?: string;
   order?: "asc" | "desc";
+}
+
+export interface AIStatus {
+  provider: string;
+  model: string;
+  fallback_available: boolean;
+  fallback_model: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  action_count: number;
+  chat_count: number;
+  diagnoses_count: number;
+  rag_queries_count: number;
+  rag_hits_count: number;
+  fallback_count: number;
+  success_count: number;
+  error_count: number;
+  last_latency_ms: number | null;
+  avg_latency_ms: number | null;
+  last_surface: string | null;
+  last_rag_source: string;
+}
+
+export interface AIStatsSummary {
+  total_runs: number;
+  runs_by_surface: Record<string, number>;
+  success_rate: number;
+  fallback_rate: number;
+  total_rag_queries: number;
+  rag_hit_rate: number;
+  positive_feedback_count: number;
+  negative_feedback_count: number;
+  helped_rate: number;
+  tickets_closed_with_ai: number;
+  tickets_closed_without_ai: number;
+  avg_time_to_close_with_ai_hours: number | null;
+  avg_time_to_close_without_ai_hours: number | null;
+  total_estimated_cost_usd: number;
+  avg_cost_per_run_usd: number;
+  avg_cost_per_ticket_with_ai_usd: number;
+}
+
+export interface AITicketStats {
+  ticket_id: string;
+  diagnosis_runs: number;
+  chat_runs: number;
+  rag_queries_count: number;
+  rag_hit_rate: number;
+  last_ai_used_at: string | null;
+  positive_feedback_count: number;
+  negative_feedback_count: number;
+  helped: boolean | null;
+  first_closed_at: string | null;
+  time_to_close_hours: number | null;
+  estimated_cost_usd: number;
 }

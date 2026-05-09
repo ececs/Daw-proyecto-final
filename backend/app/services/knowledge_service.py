@@ -11,6 +11,7 @@ Flow:
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
 from sqlalchemy import delete, select
@@ -24,6 +25,16 @@ logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
+
+
+@dataclass
+class KnowledgeSearchStats:
+    chunks: list[KnowledgeChunk]
+    source_type: str
+
+    @property
+    def hits(self) -> int:
+        return len(self.chunks)
 
 
 def _chunk_text(text: str) -> list[str]:
@@ -182,7 +193,7 @@ async def ingest_attachment(
             chunk_index=i,
             content=chunk,
             embedding=emb,
-            chunk_metadata={"ticket_id": ticket_id, "attachment_id": attachment_id},
+            chunk_metadata={"ticket_id": ticket_id, "attachment_id": attachment_id, "type": "attachment"},
         )
         for i, (chunk, emb) in enumerate(zip(chunks, embeddings))
     ]
@@ -205,6 +216,38 @@ async def search(db: AsyncSession, query: str, k: int = 5, ticket_id: Optional[s
     Return the top-k knowledge chunks most relevant to `query`.
     If ticket_id is provided, prioritizes or limits to chunks linked to that ticket.
     """
+    stats = await search_with_stats(db, query=query, k=k, ticket_id=ticket_id)
+    return [row.content for row in stats.chunks]
+
+
+def _apply_ticket_filter(stmt, ticket_id: Optional[str]):
+    if ticket_id:
+        from sqlalchemy import func
+        stmt = stmt.where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket_id))
+    return stmt
+
+
+def _detect_source_type(chunks: list[KnowledgeChunk]) -> str:
+    types = set()
+    for chunk in chunks:
+        metadata = chunk.chunk_metadata or {}
+        chunk_type = metadata.get("type")
+        if chunk_type == "client_web_context":
+            types.add("web")
+        elif chunk_type == "attachment":
+            types.add("attachment")
+        else:
+            types.add("global")
+    if not types:
+        return "none"
+    if len(types) > 1:
+        return "mixed"
+    return next(iter(types))
+
+
+async def search_with_stats(
+    db: AsyncSession, query: str, k: int = 5, ticket_id: Optional[str] = None
+) -> KnowledgeSearchStats:
     query_embedding = await generate_embedding(query, task_type="RETRIEVAL_QUERY")
 
     if query_embedding is not None:
@@ -212,22 +255,15 @@ async def search(db: AsyncSession, query: str, k: int = 5, ticket_id: Optional[s
             select(KnowledgeChunk)
             .where(KnowledgeChunk.embedding.isnot(None))  # type: ignore[attr-defined]
         )
-        # If we have a ticket_id, we search specifically for chunks with that chunk_metadata
-        # or we could do a union. For simplicity and precision, if ticket_id is provided,
-        # we look for those first.
-        if ticket_id:
-            from sqlalchemy import func
-            stmt = stmt.where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket_id))
-            
+        stmt = _apply_ticket_filter(stmt, ticket_id)
         stmt = stmt.order_by(KnowledgeChunk.embedding.cosine_distance(query_embedding))  # type: ignore[attr-defined]
         stmt = stmt.limit(k)
     else:
         pattern = f"%{query}%"
         stmt = select(KnowledgeChunk).where(KnowledgeChunk.content.ilike(pattern))
-        if ticket_id:
-            from sqlalchemy import func
-            stmt = stmt.where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket_id))
+        stmt = _apply_ticket_filter(stmt, ticket_id)
         stmt = stmt.limit(k)
 
     result = await db.execute(stmt)
-    return [row.content for row in result.scalars().all()]
+    chunks = result.scalars().all()
+    return KnowledgeSearchStats(chunks=chunks, source_type=_detect_source_type(chunks))

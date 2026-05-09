@@ -52,3 +52,7 @@ playwright-report/
 test-results/
 frontend/playwright-report/
 frontend/test-results/
+
+# Office Temporary Files
+~$*
+

@@ -5,7 +5,7 @@ Repositorio creado específicamente para esta prueba.
 
 ## Demo en producción
 
-**URL:** [https://frontend-eight-chi-54.vercel.app/board]
+**URL:** [https://daw-proyecto-final-beta.vercel.app/board]
 
 Hay dos formas de acceder:
 

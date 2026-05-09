@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # CORS Origins: Allowed origins for cross-domain requests
     CORS_ORIGINS: Any = [
         "http://localhost:3000",
-        "https://frontend-eight-chi-54.vercel.app"
+        "https://daw-proyecto-final-beta.vercel.app"
     ]
 
     @field_validator("CORS_ORIGINS", mode="before")

@@ -1,7 +1,7 @@
 """add_ai_runs_and_feedback
 
 Revision ID: 1a2b3c4d5e6f
-Revises: a7b8c9d0e1f2
+Revises: aa9501823b21
 Create Date: 2026-05-09 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "1a2b3c4d5e6f"
-down_revision = "a7b8c9d0e1f2"
+down_revision = "aa9501823b21"
 branch_labels = None
 depends_on = None
 

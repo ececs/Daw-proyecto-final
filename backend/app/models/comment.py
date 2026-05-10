@@ -22,7 +22,7 @@ class Comment(Base):
 
     # CASCADE: deleting the ticket removes all its comments
     ticket_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True
     )
     author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)

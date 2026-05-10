@@ -171,8 +171,15 @@ async def create_ticket(body: TicketCreate, db: DB, current_user: CurrentUser):
 
 @router.get("/{ticket_ref}", response_model=TicketOut, summary="Get a ticket by number")
 async def get_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
+    cache_key = f"{CACHE_PREFIX}detail:{ticket_ref}"
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return TicketOut(**cached)
+
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
-    return TicketOut.model_validate(ticket)
+    out = TicketOut.model_validate(ticket)
+    await cache_set(cache_key, out.model_dump(mode="json"), ttl=CACHE_TTL)
+    return out
 
 
 @router.patch("/{ticket_ref}", response_model=TicketOut, summary="Update a ticket")

@@ -14,7 +14,7 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Clock, Paperclip, Trash2, Download, MessageSquare, Send, Loader2, Sparkles, RefreshCw, Globe, ExternalLink, Info, ChevronDown, ChevronUp, History, BarChart3, ThumbsUp, ThumbsDown,
@@ -119,6 +119,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
   const [confirmDeleteAttachmentId, setConfirmDeleteAttachmentId] = useState<string | null>(null);
   
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const aiStatsRef = useRef<HTMLDivElement>(null);
 
   // Dynamic textarea resizing for main comment
   useEffect(() => {
@@ -152,8 +153,22 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
     fetchData();
   }, [ticketId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // AI stats load lazily when the stats section scrolls into view, so they
+  // don't compete with ticket/comments/attachments on the critical first load.
   useEffect(() => {
-    void fetchAITicketStats();
+    const el = aiStatsRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          observer.disconnect();
+          void fetchAITicketStats();
+        }
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [ticketId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Real-time refresh listener (WebSockets)
@@ -208,7 +223,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
     }
   };
 
-  const fetchAITicketStats = async () => {
+  const fetchAITicketStats = useCallback(async () => {
     if (!ticketId || ticketId === "None" || ticketId === "undefined") return;
     setIsLoadingAITicketStats(true);
     try {
@@ -219,7 +234,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
     } finally {
       setIsLoadingAITicketStats(false);
     }
-  };
+  }, [ticketId]);
 
   // ── Ticket field updates ─────────────────────────────────────────────────
 
@@ -1074,7 +1089,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
             </form>
           </div>
 
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div ref={aiStatsRef} className="bg-white rounded-xl border border-slate-200 p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                 <BarChart3 className="w-4 h-4 text-blue-500" /> Impacto de IA en este ticket

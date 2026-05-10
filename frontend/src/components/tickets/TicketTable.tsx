@@ -13,7 +13,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 import { Ticket, TicketFilters, TicketPriority, TicketStatus, User } from "@/types";
@@ -63,6 +63,25 @@ export function TicketTable({
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingDeleteRequest, setPendingDeleteRequest] = useState<{ id: string; title: string } | null>(null);
+
+  // Local state for the search input — debounced 350ms before propagating to
+  // the parent filter so each keystroke doesn't fire a network request.
+  const [searchInput, setSearchInput] = useState(filters.search ?? "");
+
+  // Keep local input in sync when the parent clears filters externally.
+  useEffect(() => {
+    setSearchInput(filters.search ?? "");
+  }, [filters.search]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchInput !== (filters.search ?? "")) {
+        onFiltersChange({ ...filters, search: searchInput || undefined, page: 1 });
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput]);
 
   const handleSort = (field: SortField) => {
     const newDir = sortBy === field && sortDir === "desc" ? "asc" : "desc";
@@ -150,8 +169,8 @@ export function TicketTable({
           type="text"
           aria-label="Buscar tickets"
           placeholder="Search tickets..."
-          value={filters.search ?? ""}
-          onChange={(e) => onFiltersChange({ ...filters, search: e.target.value, page: 1 })}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-52"
         />
 

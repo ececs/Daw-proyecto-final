@@ -85,15 +85,17 @@ class Ticket(Base):
         SAEnum(TicketStatus, name="ticket_status"),
         default=TicketStatus.open,
         nullable=False,
+        index=True,
     )
     priority: Mapped[TicketPriority] = mapped_column(
         SAEnum(TicketPriority, name="ticket_priority"),
         default=TicketPriority.medium,
         nullable=False,
+        index=True,
     )
 
     author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    assignee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
 
     client_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     client_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -105,11 +107,13 @@ class Ticket(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
+        index=True,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+        index=True,
     )
 
     # Relationships — used by selectinload() for efficient eager loading.

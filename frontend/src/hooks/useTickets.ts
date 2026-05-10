@@ -16,7 +16,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import api from "@/lib/api";
 import { integrateCreatedTicket } from "@/lib/ticketRealtime";
 import useNotificationStore from "@/stores/notificationStore";
@@ -102,6 +102,24 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
     }
   }, [refreshSignal, lastTicketId, deletedTicketId, filters, refetch]);
 
+  // Stable serialized key — only changes when a filter value actually changes.
+  // Using explicit primitive dependencies avoids re-fetching when the filters
+  // object reference changes but the values stay the same (e.g. parent re-renders).
+  const filtersKey = useMemo(
+    () => JSON.stringify({
+      status: filters.status,
+      priority: filters.priority,
+      assignee_id: filters.assignee_id,
+      search: filters.search,
+      page: filters.page,
+      size: filters.size,
+      sort_by: filters.sort_by,
+      order: filters.order,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filters.status, filters.priority, filters.assignee_id, filters.search, filters.page, filters.size, filters.sort_by, filters.order]
+  );
+
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
@@ -128,7 +146,7 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
       });
 
     return () => { cancelled = true; };
-  }, [fetchKey, JSON.stringify(filters)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchKey, filtersKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Optimistically update a ticket's status in the local list, then PATCH the API.

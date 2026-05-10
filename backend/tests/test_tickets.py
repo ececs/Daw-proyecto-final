@@ -99,6 +99,14 @@ async def test_create_ticket_with_client_url(client: AsyncClient):
     assert data.get("client_url") == "https://example.com/docs"
 
 
+async def test_create_ticket_normalizes_client_url_without_scheme(client: AsyncClient):
+    """Bare domains should be normalized to absolute HTTPS URLs."""
+    data = await _create_ticket(
+        client, title="T", client_url="example.com/docs"
+    )
+    assert data.get("client_url") == "https://example.com/docs"
+
+
 async def test_create_ticket_without_auth_returns_401(unauth_client: AsyncClient):
     r = await unauth_client.post("/api/v1/tickets", json={"title": "T"})
     assert r.status_code == 401

@@ -5,6 +5,26 @@ from app.models.ticket import TicketStatus, TicketPriority
 from .user import UserOut
 
 
+def _normalize_client_url(value: str | None) -> str | None:
+    """
+    Normalize historical or manually-entered client URLs.
+
+    Some tickets may store bare domains such as ``example.com``. We persist
+    them as absolute HTTPS URLs so frontend rendering and background scraping
+    behave consistently.
+    """
+    if value is None:
+        return None
+
+    trimmed = value.strip()
+    if not trimmed:
+        return None
+
+    if "://" not in trimmed:
+        return f"https://{trimmed}"
+    return trimmed
+
+
 class TicketCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
@@ -20,6 +40,11 @@ class TicketCreate(BaseModel):
             raise ValueError("title must not be blank")
         return v.strip()
 
+    @field_validator("client_url")
+    @classmethod
+    def normalize_client_url(cls, v: str | None) -> str | None:
+        return _normalize_client_url(v)
+
 
 class TicketUpdate(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=255)
@@ -29,6 +54,11 @@ class TicketUpdate(BaseModel):
     assignee_id: uuid.UUID | None = None
     client_url: str | None = None
     client_summary: str | None = None
+
+    @field_validator("client_url")
+    @classmethod
+    def normalize_client_url(cls, v: str | None) -> str | None:
+        return _normalize_client_url(v)
 
 
 class ReplyDraftRequest(BaseModel):

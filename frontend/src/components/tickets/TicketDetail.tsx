@@ -175,18 +175,24 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
     if (!ticketId || ticketId === "None" || ticketId === "undefined") return;
     if (!background) setIsLoading(true);
     try {
-      const [ticketRes, commentsRes, attachmentsRes, webCtxRes, historyRes] = await Promise.all([
+      // Load the critical ticket UI first; slower auxiliary blocks can hydrate afterwards.
+      const [ticketRes, commentsRes, attachmentsRes] = await Promise.all([
         api.get<Ticket>(`/tickets/${ticketId}`),
         api.get<Comment[]>(`/tickets/${ticketId}/comments`),
         api.get<Attachment[]>(`/tickets/${ticketId}/attachments`).catch(() => ({ data: [] as Attachment[] })),
-        api.get<{ content: string | null }>(`/tickets/${ticketId}/web-context`).catch(() => ({ data: { content: null } })),
-        api.get<TicketHistory[]>(`/tickets/${ticketId}/history`).catch(() => ({ data: [] as TicketHistory[] })),
       ]);
       setTicket(ticketRes.data);
       setComments(commentsRes.data);
       setAttachments(attachmentsRes.data);
-      setExtractedContent(webCtxRes.data.content);
-      setHistory(historyRes.data);
+
+      // Secondary data does not need to block the initial paint of the detail page.
+      void Promise.all([
+        api.get<{ content: string | null }>(`/tickets/${ticketId}/web-context`).catch(() => ({ data: { content: null } })),
+        api.get<TicketHistory[]>(`/tickets/${ticketId}/history`).catch(() => ({ data: [] as TicketHistory[] })),
+      ]).then(([webCtxRes, historyRes]) => {
+        setExtractedContent(webCtxRes.data.content);
+        setHistory(historyRes.data);
+      });
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number; data?: { detail?: string } } })?.response?.status;
       const detail = (err as { response?: { status?: number; data?: { detail?: string } } })?.response?.data?.detail;

@@ -164,9 +164,6 @@ async def create_ticket(body: TicketCreate, db: DB, current_user: CurrentUser):
         client_url=body.client_url,
         client_summary=body.client_summary,
     )
-
-    if body.client_url:
-        asyncio.create_task(scraping_service.scrape_and_index_url(ticket.id, body.client_url))
     await cache_invalidate_prefix(CACHE_PREFIX)
 
     return ticket

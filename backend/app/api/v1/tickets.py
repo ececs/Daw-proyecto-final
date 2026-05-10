@@ -34,7 +34,14 @@ from app.core.dependencies import CurrentUser, DB
 from app.ai import observability
 from app.models.ticket import Ticket, TicketPriority, TicketStatus
 from app.models.user import User
-from app.schemas.ticket import TicketCreate, TicketListResponse, TicketOut, TicketUpdate
+from app.schemas.ticket import (
+    ReplyDraftRequest,
+    ReplyDraftResponse,
+    TicketCreate,
+    TicketListResponse,
+    TicketOut,
+    TicketUpdate,
+)
 from app.services.cache_service import cache_get, cache_set, cache_invalidate_prefix
 from app.services.embedding_service import generate_ticket_embedding
 from app.services import ticket_service, notification_service, ai_copilot_service, scraping_service, ai_metrics_service
@@ -54,6 +61,25 @@ SORTABLE_COLUMNS = {
     "title": Ticket.title,
     "ticket_number": Ticket.ticket_number,
 }
+
+
+async def _resolve_ticket_or_raise(db: DB, ticket_ref: str) -> Ticket:
+    """
+    Resolve a ticket reference with stable validation semantics.
+
+    The API accepts both sequential numbers and legacy UUIDs, but malformed
+    values should be rejected as validation errors instead of "not found".
+    """
+    if not ticket_service.is_valid_ticket_ref(ticket_ref):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Invalid ticket reference format",
+        )
+
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return ticket
 
 
 @router.get("", response_model=TicketListResponse, summary="List tickets with filters")
@@ -148,9 +174,7 @@ async def create_ticket(body: TicketCreate, db: DB, current_user: CurrentUser):
 
 @router.get("/{ticket_ref}", response_model=TicketOut, summary="Get a ticket by number")
 async def get_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     return TicketOut.model_validate(ticket)
 
 
@@ -161,9 +185,7 @@ async def update_ticket(
     db: DB,
     current_user: CurrentUser,
 ):
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     update_data = body.model_dump(exclude_unset=True)
     updated_ticket = await ticket_service.update_ticket(
@@ -180,17 +202,72 @@ async def update_ticket(
 @router.get("/{ticket_ref}/history", summary="Get audit history for a ticket")
 async def get_ticket_history(ticket_ref: str, db: DB, current_user: CurrentUser):
     from app.services import history_service
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     return await history_service.get_history(db, ticket.id)
+
+
+@router.post("/{ticket_ref}/reply-draft", response_model=ReplyDraftResponse, summary="Generate an AI comment draft")
+async def generate_reply_draft(
+    ticket_ref: str,
+    body: ReplyDraftRequest,
+    db: DB,
+    current_user: CurrentUser,
+):
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
+
+    preferred_provider = body.preferred_provider or "auto"
+    # Keep the provider-selection rules identical to chat/diagnosis so metrics stay comparable.
+    tracker = ai_metrics_service.AIRunTracker(
+        surface="reply_draft",
+        user_id=current_user.id,
+        ticket_id=ticket.id,
+        primary_provider=ai_metrics_service.configured_primary_signature()[0] if preferred_provider == "auto" else preferred_provider,
+        primary_model="gpt-4o-mini" if preferred_provider == "openai" else ("gemini-2.5-flash" if preferred_provider == "google" else ai_metrics_service.configured_primary_signature()[1]),
+        input_tokens=0,
+    )
+    ai_run = await ai_metrics_service.create_ai_run(
+        db,
+        user_id=current_user.id,
+        surface="reply_draft",
+        ticket_id=ticket.id,
+        thread_id=None,
+        estimated_input_tokens=0,
+    )
+    tracker.ai_run_id = ai_run.id
+
+    try:
+        draft = await ai_copilot_service.get_ticket_reply_draft(
+            db,
+            ticket.id,
+            body.resolution_note,
+            tracker=tracker,
+            preferred_provider=preferred_provider,
+        )
+        await ai_metrics_service.finalize_ai_run(
+            db,
+            ai_run,
+            tracker,
+            success=True,
+        )
+        return ReplyDraftResponse(draft=draft, ai_run_id=ai_run.id)
+    except Exception as exc:
+        # Convert provider/library failures into a stable API contract for the frontend.
+        await ai_metrics_service.finalize_ai_run(
+            db,
+            ai_run,
+            tracker,
+            success=False,
+            error_message=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not generate AI reply draft.",
+        ) from exc
 
 
 @router.delete("/{ticket_ref}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a ticket")
 async def delete_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     if ticket.author_id != current_user.id:
         raise HTTPException(
@@ -219,9 +296,7 @@ async def delete_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
 
 @router.post("/{ticket_ref}/deletion-request", summary="Ask the author to delete a ticket")
 async def request_ticket_deletion(ticket_ref: str, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     if ticket.author_id == current_user.id:
         raise HTTPException(
@@ -248,9 +323,7 @@ async def get_diagnosis(
     preferred_provider: str | None = None,
 ):
     """Generate an AI diagnosis and suggested solution for a ticket (streamed)."""
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     observability.increment_diagnosis()
     tracker = ai_metrics_service.AIRunTracker(
         surface="diagnosis",
@@ -308,9 +381,7 @@ async def get_ticket_web_context(
     current_user: CurrentUser,
 ):
     """Fetches the latest AI-extracted web context for this ticket."""
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     result = await db.execute(
         select(KnowledgeChunk)
         .where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket.id))
@@ -328,8 +399,8 @@ async def refresh_ticket_web_scrape(
     current_user: CurrentUser,
 ):
     """Manually triggers a new web scrape for the ticket's URL."""
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket or not ticket.client_url:
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
+    if not ticket.client_url:
         raise HTTPException(status_code=400, detail="Ticket has no URL to scrape.")
     asyncio.create_task(scraping_service.scrape_and_index_url(ticket.id, ticket.client_url))
     return {"status": "scraping_started"}

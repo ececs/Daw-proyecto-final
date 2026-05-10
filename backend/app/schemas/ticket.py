@@ -31,6 +31,32 @@ class TicketUpdate(BaseModel):
     client_summary: str | None = None
 
 
+class ReplyDraftRequest(BaseModel):
+    resolution_note: str = Field(..., min_length=1, max_length=2000)
+    preferred_provider: str | None = Field(default="auto")
+
+    @field_validator("resolution_note")
+    @classmethod
+    def resolution_note_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("resolution_note must not be blank")
+        return v.strip()
+
+    @field_validator("preferred_provider")
+    @classmethod
+    def preferred_provider_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return "auto"
+        if v not in {"auto", "openai", "google"}:
+            raise ValueError("preferred_provider must be one of: auto, openai, google")
+        return v
+
+
+class ReplyDraftResponse(BaseModel):
+    draft: str
+    ai_run_id: uuid.UUID
+
+
 class TicketOut(BaseModel):
     id: uuid.UUID
     ticket_number: int

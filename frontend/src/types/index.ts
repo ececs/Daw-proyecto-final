@@ -202,3 +202,13 @@ export interface AITicketStats {
 }
 
 export type AIPreference = "auto" | "openai" | "google";
+
+export interface ReplyDraftRequest {
+  resolution_note: string;
+  preferred_provider?: AIPreference;
+}
+
+export interface ReplyDraftResponse {
+  draft: string;
+  ai_run_id: string;
+}

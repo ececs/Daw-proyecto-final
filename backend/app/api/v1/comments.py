@@ -13,15 +13,32 @@ from app.services import comment_service, ticket_service
 router = APIRouter(prefix="/tickets", tags=["Comments"])
 
 
+async def _resolve_ticket_or_raise(db: DB, ticket_ref: str):
+    """
+    Resolve the parent ticket before comment operations.
+
+    Comment routes should mirror ticket routes and reject malformed references
+    with a validation error instead of a generic 404.
+    """
+    if not ticket_service.is_valid_ticket_ref(ticket_ref):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Invalid ticket reference format",
+        )
+
+    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return ticket
+
+
 @router.get(
     "/{ticket_ref}/comments",
     response_model=List[CommentOut],
     summary="List comments on a ticket",
 )
 async def list_comments(ticket_ref: str, db: DB, current_user: CurrentUser):
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     return await comment_service.list_comments(db, ticket.id)
 
 
@@ -37,9 +54,7 @@ async def create_comment(
     db: DB,
     current_user: CurrentUser,
 ):
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     comment = await comment_service.create_comment(
         db, ticket_id=ticket.id, content=body.content, author=current_user
     )
@@ -59,9 +74,7 @@ async def delete_comment(
     db: DB,
     current_user: CurrentUser,
 ):
-    ticket = await ticket_service.resolve_ticket(db, ticket_ref)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     success = await comment_service.delete_comment(
         db, comment_id=comment_id, actor_id=current_user.id

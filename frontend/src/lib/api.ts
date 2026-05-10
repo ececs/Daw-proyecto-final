@@ -16,7 +16,10 @@ import { getAuthToken } from "./auth";
 const api = axios.create({
   baseURL: `${process.env.NEXT_PUBLIC_API_URL}/api/v1`,
   withCredentials: true,
-  timeout: 10000,
+  // A slightly higher timeout prevents false negatives during local E2E runs,
+  // where concurrent WebSocket activity and dev-mode reload overhead can make
+  // otherwise healthy requests exceed 10 seconds.
+  timeout: 20000,
   headers: {
     "Content-Type": "application/json",
   },

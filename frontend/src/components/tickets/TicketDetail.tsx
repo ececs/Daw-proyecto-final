@@ -22,6 +22,7 @@ import {
 import api from "@/lib/api";
 import {
   Ticket, Comment, Attachment, TicketStatus, TicketPriority, User, TicketHistory, AITicketStats,
+  ReplyDraftResponse,
 } from "@/types";
 import { getAuthToken } from "@/lib/auth";
 import { getAIPreference } from "@/lib/aiPreference";
@@ -86,6 +87,9 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
   // Comment form state
   const [commentText, setCommentText] = useState("");
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const [resolutionNote, setResolutionNote] = useState("");
+  const [isGeneratingReply, setIsGeneratingReply] = useState(false);
+  const [replyDraftRunId, setReplyDraftRunId] = useState<string | null>(null);
 
   // Attachment upload state
   const [isUploading, setIsUploading] = useState(false);
@@ -266,6 +270,42 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
     if (!confirm("Delete this comment?")) return;
     await api.delete(`/tickets/${ticketId}/comments/${commentId}`);
     setComments((prev) => prev.filter((c) => c.id !== commentId));
+  };
+
+  const handleGenerateReplyDraft = async () => {
+    const note = resolutionNote.trim();
+    if (!note || isGeneratingReply) return;
+
+    // Never overwrite a human draft silently.
+    if (commentText.trim() && !confirm("This will replace the current comment draft. Continue?")) {
+      return;
+    }
+
+    setIsGeneratingReply(true);
+    try {
+      const preferredProvider = getAIPreference();
+      const { data } = await api.post<ReplyDraftResponse>(`/tickets/${ticketId}/reply-draft`, {
+        resolution_note: note,
+        preferred_provider: preferredProvider,
+      });
+      // Reuse the existing manual comment flow: AI only prepares the draft.
+      setCommentText(data.draft);
+      setReplyDraftRunId(data.ai_run_id);
+      toast({
+        title: "Borrador generado",
+        description: "La IA ha preparado un comentario que puedes revisar antes de enviarlo.",
+      });
+      void fetchAITicketStats();
+    } catch (error) {
+      console.error("Failed to generate AI reply draft", error);
+      toast({
+        title: "Error al generar borrador",
+        description: "No se pudo generar el borrador de respuesta. El comentario actual no se ha modificado.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingReply(false);
+    }
   };
 
   // ── Attachments ──────────────────────────────────────────────────────────
@@ -948,6 +988,40 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
             </div>
 
             {/* Add comment form */}
+            <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+              <div className="mb-2 flex items-center gap-1.5">
+                <Sparkles className="h-4 w-4 text-blue-600" />
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">AI Reply</h3>
+              </div>
+              <p className="mb-3 text-xs text-slate-600">
+                Escribe un resumen corto de la solución y la IA preparará un borrador profesional en la caja de comentario. El envío seguirá siendo manual.
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <textarea
+                  aria-label="Resumen corto de la solución"
+                  value={resolutionNote}
+                  onChange={(e) => setResolutionNote(e.target.value)}
+                  placeholder="Ej. Se corrigió el DNS del subdominio y se invalidó la caché de Cloudflare."
+                  rows={2}
+                  className="min-h-[72px] flex-1 rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleGenerateReplyDraft}
+                  disabled={isGeneratingReply || !resolutionNote.trim()}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:self-end"
+                >
+                  {isGeneratingReply ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                  Generar borrador
+                </button>
+              </div>
+              {replyDraftRunId && (
+                <p className="mt-2 text-[11px] text-slate-500">
+                  Borrador IA preparado. Revísalo y edítalo libremente antes de publicarlo.
+                </p>
+              )}
+            </div>
+
             <form onSubmit={submitComment} className="flex gap-2">
               <textarea
                 aria-label="Escribir un comentario"

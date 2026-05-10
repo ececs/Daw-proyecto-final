@@ -29,6 +29,27 @@ import logging
 from . import notification_service, embedding_service, scraping_service, cache_service, history_service
 
 
+def is_valid_ticket_ref(ref: str) -> bool:
+    """
+    Validate whether a ticket reference matches one of the supported formats.
+
+    The API accepts both sequential numbers and legacy UUIDs. Keeping this
+    validation in the service layer avoids duplicating parsing rules across
+    multiple routers.
+    """
+    try:
+        int(ref)
+        return True
+    except ValueError:
+        pass
+
+    try:
+        uuid.UUID(ref)
+        return True
+    except ValueError:
+        return False
+
+
 async def hybrid_search_tickets(
     db: AsyncSession,
     base_query,

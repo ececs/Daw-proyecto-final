@@ -250,6 +250,7 @@ async def get_stats_summary(db: AsyncSession) -> dict:
     runs_by_surface = {
         "chat": sum(1 for run in runs if run.surface == "chat"),
         "diagnosis": sum(1 for run in runs if run.surface == "diagnosis"),
+        "reply_draft": sum(1 for run in runs if run.surface == "reply_draft"),
     }
     success_count = sum(1 for run in runs if run.success)
     fallback_count = sum(1 for run in runs if run.used_fallback)

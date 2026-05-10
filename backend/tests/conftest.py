@@ -2,37 +2,50 @@ import uuid
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
 from app.core.dependencies import get_current_user
 from app.db.base import Base
 from app.db.session import get_db
 from app.models.user import User
 
-TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+TEST_DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5433/ticketai_test"
+TEST_DB_ADMIN_URL = "postgresql://postgres:postgres@localhost:5433/postgres"
+
+
+async def _ensure_test_database() -> None:
+    """
+    Create the dedicated PostgreSQL test database if it does not exist yet.
+
+    Using PostgreSQL here keeps the test environment aligned with production
+    features such as sequences and pgvector-backed schema objects.
+    """
+    conn = await asyncpg.connect(TEST_DB_ADMIN_URL)
+    try:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = 'ticketai_test'"
+        )
+        if not exists:
+            await conn.execute('CREATE DATABASE "ticketai_test"')
+    finally:
+        await conn.close()
 
 # ── Database ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 async def engine():
-    eng = create_async_engine(
-        TEST_DB_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-    # Enable SQLite foreign key enforcement so ondelete="CASCADE" is respected
-    @event.listens_for(eng.sync_engine, "connect")
-    def _set_sqlite_pragma(dbapi_conn, _):
-        cursor = dbapi_conn.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+    await _ensure_test_database()
+    eng = create_async_engine(TEST_DB_URL, echo=False)
 
     async with eng.begin() as conn:
+        # PostgreSQL sequences and pgvector extension are part of the real schema contract.
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.execute(text("CREATE SEQUENCE IF NOT EXISTS ticket_number_seq"))
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield eng
     await eng.dispose()

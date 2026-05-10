@@ -174,6 +174,72 @@ async def test_ai_stats_summary_distinguishes_closed_tickets_with_and_without_ai
     assert stats["total_estimated_cost_usd"] == 0.0012
 
 
+async def test_reply_draft_endpoint_generates_text_and_tracks_run(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    test_user: User,
+):
+    created = await _create_ticket(
+        db_session,
+        test_user,
+        title="Reply draft ticket",
+        description="Ticket for AI reply draft",
+        client_summary="Cliente con problema de DNS ya resuelto.",
+    )
+
+    async def fake_reply(*args, **kwargs):
+        tracker = kwargs.get("tracker")
+        if tracker:
+            tracker.provider = "openai"
+            tracker.model = "gpt-4o-mini"
+            tracker.input_tokens = 100
+            tracker.append_output("Hemos aplicado la corrección y el servicio vuelve a estar operativo.")
+        return "Hemos aplicado la corrección y el servicio vuelve a estar operativo."
+
+    with patch("app.services.ai_copilot_service.get_ticket_reply_draft", side_effect=fake_reply):
+        response = await client.post(
+            f"/api/v1/tickets/{created['ticket_number']}/reply-draft",
+            json={
+                "resolution_note": "Se corrigió la configuración DNS y se limpió caché.",
+                "preferred_provider": "openai",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "operativo" in data["draft"]
+    assert data["ai_run_id"]
+
+    ai_run = await db_session.get(AIRun, uuid.UUID(data["ai_run_id"]))
+    assert ai_run is not None
+    assert ai_run.surface == "reply_draft"
+    assert ai_run.ticket_id == uuid.UUID(created["id"])
+    assert ai_run.success is True
+    assert ai_run.provider == "openai"
+    assert ai_run.model == "gpt-4o-mini"
+
+
+async def test_reply_draft_endpoint_returns_404_for_missing_ticket(client: AsyncClient):
+    response = await client.post(
+        f"/api/v1/tickets/{uuid.uuid4()}/reply-draft",
+        json={"resolution_note": "Se reinició el servicio."},
+    )
+    assert response.status_code == 404
+
+
+async def test_reply_draft_endpoint_rejects_blank_note(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    test_user: User,
+):
+    created = await _create_ticket(db_session, test_user, title="Blank note ticket")
+    response = await client.post(
+        f"/api/v1/tickets/{created['ticket_number']}/reply-draft",
+        json={"resolution_note": "   "},
+    )
+    assert response.status_code == 422
+
+
 async def test_ticket_ai_stats_uses_first_close_and_aggregates_feedback(
     client: AsyncClient,
     db_session: AsyncSession,

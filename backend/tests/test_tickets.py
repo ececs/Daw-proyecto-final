@@ -256,10 +256,12 @@ def _ticket_for_search(
     description: str | None = None,
     status: TicketStatus = TicketStatus.open,
     priority: TicketPriority = TicketPriority.medium,
+    ticket_number: int = 1,
 ) -> Ticket:
     now = datetime.now(timezone.utc)
     return Ticket(
         id=uuid.uuid4(),
+        ticket_number=ticket_number,
         title=title,
         description=description,
         status=status,
@@ -295,9 +297,9 @@ class _FakeSession:
 
 
 async def test_hybrid_search_rrf_promotes_ticket_present_in_both_rankings(test_user: User):
-    both = _ticket_for_search(title="Login bug", description="Login fails after deploy")
-    semantic_only = _ticket_for_search(title="Auth issue", description="Session bug")
-    keyword_only = _ticket_for_search(title="Login UI copy", description="Minor text issue")
+    both = _ticket_for_search(title="Login bug", description="Login fails after deploy", ticket_number=1)
+    semantic_only = _ticket_for_search(title="Auth issue", description="Session bug", ticket_number=2)
+    keyword_only = _ticket_for_search(title="Login UI copy", description="Minor text issue", ticket_number=3)
     fake_db = _FakeSession([[semantic_only, both], [both, keyword_only]])
 
     with (
@@ -323,8 +325,8 @@ async def test_hybrid_search_rrf_promotes_ticket_present_in_both_rankings(test_u
 
 
 async def test_hybrid_search_keeps_keyword_match_without_embedding(test_user: User):
-    semantic_match = _ticket_for_search(title="Authentication problem", description="Conceptually related")
-    no_embedding_keyword_match = _ticket_for_search(title="Login bug", description="Exact keyword match")
+    semantic_match = _ticket_for_search(title="Authentication problem", description="Conceptually related", ticket_number=1)
+    no_embedding_keyword_match = _ticket_for_search(title="Login bug", description="Exact keyword match", ticket_number=2)
     fake_db = _FakeSession([[semantic_match], [no_embedding_keyword_match]])
 
     with (
@@ -351,7 +353,7 @@ async def test_hybrid_search_keeps_keyword_match_without_embedding(test_user: Us
 
 
 async def test_hybrid_search_pages_over_fused_rankings(test_user: User):
-    tickets = [_ticket_for_search(title=f"Login result {i}") for i in range(4)]
+    tickets = [_ticket_for_search(title=f"Login result {i}", ticket_number=i + 1) for i in range(4)]
     fake_db = _FakeSession([tickets, tickets])
 
     with (

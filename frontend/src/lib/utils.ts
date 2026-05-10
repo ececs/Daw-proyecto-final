@@ -58,6 +58,36 @@ export function formatDateTime(isoString: string): string {
   });
 }
 
+/**
+ * Normalize user-provided external URLs so the UI can safely open them.
+ *
+ * Some historical tickets store domains like "example.com" without an explicit
+ * scheme. The browser treats those as relative paths, and `new URL(value)`
+ * throws during render. We defensively prepend https:// in that case.
+ */
+export function normalizeExternalUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
+/**
+ * Return a hostname when a URL is render-safe, otherwise fall back gracefully.
+ */
+export function getHostnameFromUrl(value: string | null | undefined): string | null {
+  const normalized = normalizeExternalUrl(value);
+  if (!normalized) return null;
+  try {
+    return new URL(normalized).hostname;
+  } catch {
+    return normalized;
+  }
+}
+
 /** Map ticket status to a display label. */
 export const STATUS_LABELS: Record<string, string> = {
   open: "Open",

@@ -28,7 +28,15 @@ import { getAuthToken } from "@/lib/auth";
 import { getAIPreference } from "@/lib/aiPreference";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { STATUS_LABELS, PRIORITY_CONFIG, timeAgo, formatDateTime, formatFileSize } from "@/lib/utils";
+import {
+  STATUS_LABELS,
+  PRIORITY_CONFIG,
+  timeAgo,
+  formatDateTime,
+  formatFileSize,
+  getHostnameFromUrl,
+  normalizeExternalUrl,
+} from "@/lib/utils";
 import { useUsers } from "@/hooks/useUsers";
 import { UserAvatar } from "@/components/ui/UserAvatar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -109,6 +117,19 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
   const [aiTicketStats, setAiTicketStats] = useState<AITicketStats | null>(null);
   const [isLoadingAITicketStats, setIsLoadingAITicketStats] = useState(false);
   const [confirmDeleteAttachmentId, setConfirmDeleteAttachmentId] = useState<string | null>(null);
+  
+  const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Dynamic textarea resizing for main comment
+  useEffect(() => {
+    const textarea = commentTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [commentText]);
+
+  const safeClientUrl = normalizeExternalUrl(ticket?.client_url);
+  const clientHostname = getHostnameFromUrl(ticket?.client_url);
 
 
   const refreshWebContext = async () => {
@@ -678,9 +699,9 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
                     <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingWeb ? "animate-spin" : ""}`} />
                   </button>
                 )}
-                {ticket.client_url && !editingUrl && (
+                {safeClientUrl && !editingUrl && (
                   <a 
-                    href={ticket.client_url} 
+                    href={safeClientUrl}
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-xs text-blue-500 hover:text-blue-700 flex items-center gap-1"
@@ -743,7 +764,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
                 >
                   <span className="flex items-center gap-1.5">
                     <Sparkles className="w-3 h-3" />
-                    Análisis automático de {new URL(ticket.client_url).hostname}
+                    Análisis automático de {clientHostname ?? "la web del cliente"}
                   </span>
                   {showExtracted ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 </button>
@@ -1027,9 +1048,10 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
                 aria-label="Escribir un comentario"
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
+                ref={commentTextareaRef}
                 placeholder="Add a comment..."
-                rows={5}
-                className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                rows={2}
+                className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none max-h-36 overflow-y-auto"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitComment(e as unknown as React.FormEvent);
                 }}

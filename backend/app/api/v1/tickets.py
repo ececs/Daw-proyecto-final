@@ -174,7 +174,7 @@ async def get_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
     cache_key = f"{CACHE_PREFIX}detail:{ticket_ref}"
     cached = await cache_get(cache_key)
     if cached is not None:
-        return TicketOut(**cached)
+        return TicketOut.model_validate(cached)
 
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     out = TicketOut.model_validate(ticket)

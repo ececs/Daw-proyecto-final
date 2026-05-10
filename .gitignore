@@ -56,3 +56,6 @@ frontend/test-results/
 # Office Temporary Files
 ~$*
 
+# Scripts generated outputs
+revision_docx/
+

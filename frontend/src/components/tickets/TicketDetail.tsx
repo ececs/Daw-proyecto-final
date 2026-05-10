@@ -1028,7 +1028,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
                 placeholder="Add a comment..."
-                rows={2}
+                rows={5}
                 className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submitComment(e as unknown as React.FormEvent);

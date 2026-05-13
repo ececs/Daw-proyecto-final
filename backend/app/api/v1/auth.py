@@ -216,8 +216,8 @@ async def demo_login(request: Request, body: DemoLoginRequest, db: DB):
     if not user:
         user = User(
             email=demo_email,
-            name="Evaluador Orbidi",
-            avatar_url="https://api.dicebear.com/7.x/bottts/svg?seed=orbidi"
+            name="Usuario Demo",
+            avatar_url="https://api.dicebear.com/7.x/bottts/svg?seed=demo"
         )
         db.add(user)
         await db.commit()

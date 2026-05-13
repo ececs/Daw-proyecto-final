@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, DB
 from app.ai.agent import build_agent
@@ -152,18 +153,25 @@ def _make_friendly_error(error_msg: str) -> str:
     return error_msg
 
 
-def _resolve_ticket_id_for_chat(request: ChatRequest) -> uuid.UUID | None:
+async def _resolve_ticket_id_for_chat(
+    request: ChatRequest, db: AsyncSession
+) -> uuid.UUID | None:
+    candidate: uuid.UUID | None = None
     if request.current_ticket_id:
         try:
-            return uuid.UUID(request.current_ticket_id)
+            candidate = uuid.UUID(request.current_ticket_id)
         except ValueError:
-            return None
-    if request.selected_ticket_ids and len(request.selected_ticket_ids) == 1:
+            candidate = None
+    if candidate is None and request.selected_ticket_ids and len(request.selected_ticket_ids) == 1:
         try:
-            return uuid.UUID(request.selected_ticket_ids[0])
+            candidate = uuid.UUID(request.selected_ticket_ids[0])
         except ValueError:
-            return None
-    return None
+            candidate = None
+    if candidate is None:
+        return None
+    from app.models.ticket import Ticket
+    exists = await db.get(Ticket, candidate)
+    return candidate if exists is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +261,7 @@ async def chat(
     tracker = ai_metrics_service.AIRunTracker(
         surface="chat",
         user_id=current_user.id,
-        ticket_id=_resolve_ticket_id_for_chat(request),
+        ticket_id=await _resolve_ticket_id_for_chat(request, db),
         thread_id=thread_id,
         primary_provider=ai_metrics_service.configured_primary_signature()[0] if (request.preferred_provider or "auto") == "auto" else request.preferred_provider,
         primary_model="gpt-4o-mini" if request.preferred_provider == "openai" else ("gemini-2.5-flash" if request.preferred_provider == "google" else ai_metrics_service.configured_primary_signature()[1]),
@@ -289,6 +297,8 @@ async def chat(
                 success=False,
                 error_message=error_msg,
             )
+        else:
+            observability.record_error(error_msg, tracker.surface)
 
         async def error_generator():
             yield f"data: {json.dumps({'type': 'error', 'content': f'*(Error de Configuración: {error_msg})*'})}\n\n"

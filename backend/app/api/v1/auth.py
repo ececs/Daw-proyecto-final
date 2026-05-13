@@ -209,7 +209,7 @@ async def demo_login(request: Request, body: DemoLoginRequest, db: DB):
         )
 
     # Use a fixed email for the demo user
-    demo_email = "evaluator@demo.local"
+    demo_email = "usuario.demo@demo.local"
     result = await db.execute(select(User).where(User.email == demo_email))
     user = result.scalar_one_or_none()
 

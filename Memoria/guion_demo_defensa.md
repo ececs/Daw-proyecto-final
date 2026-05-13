@@ -29,7 +29,7 @@
 
 *Esta es la pantalla principal. Vemos el tablero de tickets con toda la información relevante de un vistazo: título, prioridad, asignado, fecha de creación y estado.*
 
-*La vista tiene capacidades de **filtrado y ordenación**: podemos filtrar por estado, prioridad o usuario asignado, y ordenar por fecha de creación o de actualización. Esto permite a los equipos de soporte localizar rápidamente los tickets más urgentes sin tener que revisar toda la lista.*
+*La vista tiene capacidades de **filtrado y ordenación**: podemos filtrar por estado, prioridad o usuario asignado, y ordenar por cualquier columna de forma ascendente o descendente. Esto permite a los equipos de soporte localizar rápidamente los tickets más urgentes sin tener que revisar toda la lista.*
 
 **[ACCIÓN: Mostrar brevemente los filtros y aplicar uno — por ejemplo filtrar por prioridad Alta]**
 
@@ -121,9 +121,9 @@ Rellenar con estos datos:
 
 *Ahora le voy a pedir al agente que haga algo sobre el sistema usando lenguaje natural. Pero primero, voy a aplicar un filtro para que podáis ver el cambio en tiempo real mientras el agente actúa.*
 
-**[ACCIÓN: En el panel principal, filtrar por prioridad "Alta" + ordenar por fecha de creación ascendente]**
+**[ACCIÓN: En el panel principal, filtrar por prioridad "Alta" + ordenar por columna fecha de creación ascendente]**
 
-*Tenemos aquí los tickets de alta prioridad ordenados del más antiguo al más reciente. El primero de la lista es nuestro candidato. Ahora abro el chat sin quitar el filtro.*
+*Tenemos aquí los tickets de alta prioridad ordenados del más antiguo al más reciente — podemos ordenar por cualquier columna haciendo clic en su cabecera. El primero de la lista es nuestro candidato. Ahora abro el chat sin quitar el filtro.*
 
 **[ACCIÓN: Abrir el chat lateral pulsando el botón "AI" — mantener el panel filtrado visible]**
 

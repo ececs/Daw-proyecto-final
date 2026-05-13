@@ -119,27 +119,28 @@ Rellenar con estos datos:
 
 ## 7. Chat con el agente IA `~2 min`
 
-*Ahora le voy a pedir al agente que haga algo sobre el sistema usando lenguaje natural.*
+*Ahora le voy a pedir al agente que haga algo sobre el sistema usando lenguaje natural. Pero primero, voy a aplicar un filtro para que podáis ver el cambio en tiempo real mientras el agente actúa.*
 
-**[ACCIÓN: Abrir el chat lateral pulsando el botón "AI"]**
+**[ACCIÓN: En el panel principal, filtrar por prioridad "Alta" + ordenar por fecha de creación ascendente]**
+
+*Tenemos aquí los tickets de alta prioridad ordenados del más antiguo al más reciente. El primero de la lista es nuestro candidato. Ahora abro el chat sin quitar el filtro.*
+
+**[ACCIÓN: Abrir el chat lateral pulsando el botón "AI" — mantener el panel filtrado visible]**
 
 Escribir en el chat:
 
 > **"¿Cuántos tickets hay abiertos con prioridad alta? Cambia el estado del más antiguo a En Progreso y añade un comentario diciendo que estás analizando el problema."**
 
-*El agente usa LangGraph para orquestar un ciclo de razonamiento ReAct — Reasoning and Acting. Observad el proceso: primero razona qué herramientas necesita, luego las ejecuta, lee el resultado y decide si necesita hacer algo más. Todo esto ocurre en un grafo cíclico que puede iterar hasta llegar a la respuesta correcta.*
+*El agente usa LangGraph para orquestar un ciclo de razonamiento ReAct — Reasoning and Acting. Observad el proceso: primero razona qué herramientas necesita, luego las ejecuta, lee el resultado y decide si necesita hacer algo más.*
 
-*Las respuestas llegan en streaming mediante Server-Sent Events, token a token, lo que da esa experiencia fluida de escritura en tiempo real. El agente tiene acceso a herramientas como: listar tickets, cambiar estado, añadir comentarios, buscar en la base de conocimiento y crear tickets nuevos.*
-
-*Vamos a verificar que el agente realmente hizo los cambios — no solo lo dice, lo podemos comprobar en tiempo real.*
-
-**[ACCIÓN: Cerrar el chat, ir al panel principal y filtrar por prioridad "Alta" + ordenar por fecha de creación ascendente]**
-
-*Ahí está — el ticket más antiguo de alta prioridad ha cambiado a "En Progreso" y tiene el comentario del agente. El agente no solo razona, actúa sobre el sistema real. Deshago el filtro para continuar.*
+*Fijaos en el panel — mientras el agente todavía está respondiendo en el chat, el ticket ya ha cambiado de columna. Las respuestas llegan en streaming token a token y los cambios se propagan por WebSocket en tiempo real. El agente tiene acceso a herramientas como: listar tickets, cambiar estado, añadir comentarios, buscar en la base de conocimiento y crear tickets nuevos.*
 
 > ⚠️ **NOTA si falla en vivo:** Mostrar captura de pantalla preparada. No interrumpas el flujo.
 
+**[ACCIÓN: Quitar el filtro y hacer clic en el ticket de TesIA para continuar]**
+
 ---
+
 
 
 ## 8. Diagnóstico IA por ticket `~1.5 min`

@@ -135,11 +135,24 @@ Escribir en el chat:
 
 *Fijaos en el panel — mientras el agente todavía está respondiendo en el chat, el ticket ya ha cambiado de columna. Las respuestas llegan en streaming token a token y los cambios se propagan por WebSocket en tiempo real. El agente tiene acceso a herramientas como: listar tickets, cambiar estado, añadir comentarios, buscar en la base de conocimiento y crear tickets nuevos.*
 
+*Ahora voy a pedirle al agente una acción destructiva para mostrar otro mecanismo importante del sistema.*
+
+Escribir en el chat:
+
+> **"Elimina el ticket sobre el error de login en iOS que acabo de crear."**
+
+*Observad que el agente NO ejecuta la eliminación directamente. En su lugar, el sistema muestra una confirmación — esto es lo que se llama **Human in the Loop**: para acciones irreversibles como borrar datos, el agente pausa su ejecución y espera una confirmación explícita del usuario antes de proceder. Es un mecanismo de seguridad fundamental en sistemas de IA que actúan sobre datos reales.*
+
+**[ACCIÓN: Confirmar la eliminación en el diálogo de confirmación]**
+
+*Una vez confirmado, el agente ejecuta la herramienta de borrado y el ticket desaparece del panel en tiempo real. Sin la confirmación, el agente cancela la operación y no toca nada.*
+
 > ⚠️ **NOTA si falla en vivo:** Mostrar captura de pantalla preparada. No interrumpas el flujo.
 
 **[ACCIÓN: Quitar el filtro y hacer clic en el ticket de TesIA para continuar]**
 
 ---
+
 
 
 
@@ -188,16 +201,17 @@ Escribir en el campo de nota del técnico:
 | Sección | Tiempo estimado |
 |---------|----------------|
 | 1. Login y modo demo | 1 min |
-| 2. Kanban + WebSocket en tiempo real | 1.5 min |
-| 3. Notificaciones | 30 seg |
-| 4. Creación de ticket | 2 min |
-| 5. URL cliente + scraping RAG | 1.5 min |
-| 6. Adjuntar PDF + indexación | 1.5 min |
-| 7. Chat con el agente IA | 2 min |
-| 8. Diagnóstico IA | 1.5 min |
-| 9. AI Reply | 1.5 min |
-| 10. Cierre | 30 seg |
-| **Total** | **~13.5 min** |
+| 2. Panel principal + filtros | 30 seg |
+| 3. Kanban + WebSocket en tiempo real | 1.5 min |
+| 4. Notificaciones | 30 seg |
+| 5. Creación de ticket | 2 min |
+| 6. URL cliente + scraping RAG | 1.5 min |
+| 7. Adjuntar PDF + indexación | 1.5 min |
+| 8. Chat con el agente IA + Human in the Loop | 3 min |
+| 9. Diagnóstico IA | 1.5 min |
+| 10. AI Reply | 1.5 min |
+| 11. Cierre | 30 seg |
+| **Total** | **~15 min** |
 
 > 💡 **Si vas sobrado de tiempo:** Explica más despacio la parte del RAG (§5 y §6) o muestra el Swagger UI (`/docs`) para enseñar los endpoints de la API documentados automáticamente por FastAPI.
 >

@@ -46,11 +46,13 @@ async def _ingest_attachment_bg(
     storage_key: str,
     ticket_id: str,
     mime_type: str,
+    filename: str,
 ) -> None:
     """
     Background task: download and index an attachment into RAG knowledge chunks.
 
     Opens its own session so the HTTP response is not blocked by embedding calls.
+    On success, persists a notification for the ticket author + assignee.
     """
     async with AsyncSessionLocal() as db:
         try:
@@ -68,6 +70,24 @@ async def _ingest_attachment_bg(
                 "Background RAG ingestion failed for attachment %s: %s",
                 attachment_id, exc, exc_info=True,
             )
+            return
+
+        try:
+            ticket_uuid = uuid.UUID(ticket_id)
+            ticket = (
+                await db.execute(select(Ticket).where(Ticket.id == ticket_uuid))
+            ).scalar_one_or_none()
+            if ticket:
+                from app.services.notification_service import notify_rag_indexed
+                await notify_rag_indexed(
+                    db,
+                    ticket_id=ticket_uuid,
+                    author_id=ticket.author_id,
+                    assignee_id=ticket.assignee_id,
+                    message=f'Attachment indexed for RAG: {filename}',
+                )
+        except Exception as exc:
+            logger.warning("Could not send RAG-indexed notification: %s", exc)
 
 
 async def list_attachments(
@@ -202,6 +222,7 @@ async def update_attachment_rag(
             storage_key=attachment.storage_key,
             ticket_id=str(attachment.ticket_id),
             mime_type=attachment.mime_type,
+            filename=attachment.filename,
         ))
     else:
         await knowledge_service.delete_attachment_chunks(db, str(attachment_id))

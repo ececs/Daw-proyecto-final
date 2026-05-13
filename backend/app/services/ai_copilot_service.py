@@ -158,7 +158,7 @@ async def _prepare_reply_context(
         "1. Treat the technician resolution note as the primary source of truth.\n"
         "2. Do not invent steps, fixes, or results that are not supported by the note or context.\n"
         "3. Be clear, concise, professional, and practical.\n"
-        "4. Write in the same language implied by the technician note; if unclear, use Spanish.\n"
+        "4. Write in the same language implied by the technician note; if unclear, use English.\n"
         "5. Produce comment-ready text only, not explanations about your reasoning.\n"
         "6. If some detail is uncertain, use prudent language instead of making things up."
     )
@@ -209,7 +209,7 @@ async def get_ticket_diagnosis(
         return response.content
     except Exception as e:
         logger.error(f"AI Co-pilot Error: {str(e)}", exc_info=True)
-        return f"*(Error interno del Co-pilot: {str(e)})*"
+        return f"*(Co-pilot internal error: {str(e)})*"
 
 
 async def get_ticket_reply_draft(

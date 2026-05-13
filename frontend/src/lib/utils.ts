@@ -49,7 +49,7 @@ export function timeAgo(isoString: string): string {
  * Example: "4 May 2026, 14:32"
  */
 export function formatDateTime(isoString: string): string {
-  return new Date(isoString).toLocaleString(undefined, {
+  return new Date(isoString).toLocaleString("en-GB", {
     day: "numeric",
     month: "short",
     year: "numeric",

@@ -302,7 +302,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                 result = await knowledge_service.search_with_stats(db, query, k=k)
                 chunks = [chunk.content for chunk in result.chunks]
                 if metrics_tracker:
-                    metrics_tracker.record_rag(1, result.hits, result.source_type)
+                    metrics_tracker.record_rag(1, 1 if result.hits else 0, result.source_type)
                 else:
                     from app.ai import observability
                     observability.increment_rag_query(had_results=bool(chunks))

@@ -42,7 +42,7 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
                         user_id=uid,
                         ticket_id=ticket_id,
                         type=WSMessageType.SYSTEM_ALERT,
-                        message=f"Analizando URL: {url}..."
+                        message=f"Analyzing URL: {url}..."
                     )
     except Exception as e:
         logger.warning(f"Failed to send start notification: {e}")
@@ -98,22 +98,34 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
             
             await db.commit()
             
-        # 5. Notify via WebSocket (Live UI update)
+        # 5. Notify via WebSocket (Live UI update) + persist notification
         if ticket:
-            from app.services.notification_service import broadcast_live_update
+            from app.services.notification_service import (
+                broadcast_live_update,
+                notify_rag_indexed,
+            )
             from app.schemas.websocket import WSMessageType
-            
+
             # Notify both author and assignee
             users_to_notify = {ticket.author_id}
             if ticket.assignee_id:
                 users_to_notify.add(ticket.assignee_id)
-            
+
             for uid in users_to_notify:
                 await broadcast_live_update(
                     user_id=uid,
                     ticket_id=ticket_id,
                     type=WSMessageType.WEB_SCRAPE_COMPLETED,
-                    message=f"Análisis finalizado para: {url}"
+                    message=f"Analysis finished for: {url}"
+                )
+
+            async with async_session_factory() as notif_db:
+                await notify_rag_indexed(
+                    notif_db,
+                    ticket_id=ticket_id,
+                    author_id=ticket.author_id,
+                    assignee_id=ticket.assignee_id,
+                    message=f'Website indexed for RAG: {url}',
                 )
             
         logger.info(f"Scraping Service: Successfully indexed web context for ticket {ticket_id}")

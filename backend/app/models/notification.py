@@ -27,6 +27,7 @@ class NotificationType(str, enum.Enum):
     ticket_updated = "ticket_updated"  # A ticket was modified (priority, title, etc)
     ticket_deleted = "ticket_deleted"  # A ticket was permanently deleted
     deletion_requested = "deletion_requested"  # Another user asked the author to delete the ticket
+    rag_indexed = "rag_indexed"        # A URL or attachment finished RAG indexing
 
 
 class Notification(Base):

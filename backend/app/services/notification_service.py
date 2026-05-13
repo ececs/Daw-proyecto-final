@@ -121,6 +121,33 @@ async def _create_notification(
     return notification
 
 
+async def notify_rag_indexed(
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    author_id: uuid.UUID,
+    assignee_id: uuid.UUID | None,
+    message: str,
+) -> None:
+    """
+    Persist a "RAG content ready" notification for the ticket stakeholders.
+
+    Used when a background task (URL scrape, attachment ingestion) finishes
+    indexing content into the knowledge base so the assistant can use it.
+    """
+    users_to_notify = {author_id}
+    if assignee_id:
+        users_to_notify.add(assignee_id)
+    for user_id in users_to_notify:
+        await _create_notification(
+            db,
+            user_id=user_id,
+            notification_type=NotificationType.rag_indexed,
+            ticket_id=ticket_id,
+            message=message,
+        )
+    await db.commit()
+
+
 async def notify_ticket_created(
     db: AsyncSession,
     ticket: Ticket,

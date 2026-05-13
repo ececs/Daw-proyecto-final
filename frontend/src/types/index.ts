@@ -96,7 +96,8 @@ export type NotificationType =
   | "status_changed"
   | "ticket_updated"
   | "ticket_deleted"
-  | "deletion_requested";
+  | "deletion_requested"
+  | "rag_indexed";
 
 export interface Notification {
   id: string;

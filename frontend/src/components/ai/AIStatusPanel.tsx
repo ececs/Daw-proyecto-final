@@ -94,14 +94,14 @@ export function AIStatusButton() {
           {/* Model info */}
           <div className="px-4 py-3 space-y-2 text-xs border-b border-slate-100">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">Preferencia</span>
+              <span className="text-slate-400">Preference</span>
               <select
                 value={preference}
                 onChange={(e) => handlePreferenceChange(e.target.value as AIPreference)}
                 className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
-                aria-label="Preferencia de modelo IA"
+                aria-label="AI model preference"
               >
-                <option value="auto">Automático</option>
+                <option value="auto">Automatic</option>
                 <option value="openai">GPT-4o-mini</option>
                 <option value="google">Gemini 2.5 Flash</option>
               </select>
@@ -148,7 +148,7 @@ export function AIStatusButton() {
             <div className="px-4 py-3 space-y-2 text-xs border-t border-slate-100">
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Historical stats</p>
               <Metric icon={BarChart3} label="Total runs" value={stats.total_runs} />
-              <Metric icon={Clock3} label="Close with IA" value={stats.tickets_closed_with_ai} />
+              <Metric icon={Clock3} label="Closed with AI" value={stats.tickets_closed_with_ai} />
               <Metric icon={Search} label="RAG hit rate" value={`${Math.round(stats.rag_hit_rate * 100)}%`} />
               <Metric icon={ThumbsUp} label="Helped" value={`${Math.round(stats.helped_rate * 100)}%`} />
               <Row label="Total cost" value={`$${stats.total_estimated_cost_usd.toFixed(4)}`} />

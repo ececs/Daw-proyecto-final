@@ -55,7 +55,10 @@ export function DashboardHeader({ token }: DashboardHeaderProps) {
     }
     // Manually clear the cookie just in case (essential for the Demo flow)
     document.cookie = "access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
-    
+
+    const { resetAISessionStart } = await import("@/lib/aiSession");
+    resetAISessionStart();
+
     // Redirect and force a full refresh to clear any state
     router.push("/login");
     window.location.reload();

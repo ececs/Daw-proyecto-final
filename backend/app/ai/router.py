@@ -26,6 +26,7 @@ Memory strategy:
 import json
 import uuid
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -350,12 +351,31 @@ async def chat(
 
 
 @router.get("/status", summary="AI assistant operational status")
-async def get_ai_status(current_user: CurrentUser):
+async def get_ai_status(
+    current_user: CurrentUser,
+    db: DB,
+    since: str | None = None,
+):
     """
-    Return live observability data for the AI assistant:
-    provider, active model, fallback availability, last error, and action count.
+    Operational AI status. Provider/model/fallback come from the in-memory
+    observability state; session-usage counters are computed per-user from
+    `ai_runs` when `since` (ISO timestamp) is provided so multi-worker setups
+    stay consistent and stats are isolated by user/browser session.
     """
-    return observability.get_status()
+    base = observability.get_status()
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            if since_dt.tzinfo is None:
+                since_dt = since_dt.replace(tzinfo=timezone.utc)
+            session_stats = await ai_metrics_service.get_session_stats(
+                db, current_user.id, since_dt
+            )
+            base.update(session_stats)
+            base.setdefault("last_rag_source", "none")
+        except ValueError:
+            pass
+    return base
 
 
 @router.get("/stats")

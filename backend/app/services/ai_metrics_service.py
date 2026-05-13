@@ -240,6 +240,57 @@ async def _first_close_map(db: AsyncSession) -> dict[uuid.UUID, datetime]:
     }
 
 
+async def get_session_stats(
+    db: AsyncSession, user_id: uuid.UUID, since: datetime
+) -> dict:
+    """Per-user counters since a timestamp, computed from ai_runs.
+
+    Used by /ai/status to scope the session-usage panel to the current user's
+    browser session, instead of the process-global in-memory observability state.
+    """
+    runs = (
+        await db.execute(
+            select(AIRun)
+            .where(AIRun.user_id == user_id, AIRun.started_at >= since)
+            .order_by(AIRun.started_at.desc())
+        )
+    ).scalars().all()
+
+    chat_count = sum(1 for r in runs if r.surface == "chat")
+    diagnoses_count = sum(1 for r in runs if r.surface == "diagnosis")
+    action_count = sum(r.tool_actions_count or 0 for r in runs)
+    success_count = sum(1 for r in runs if r.success)
+    error_count = sum(1 for r in runs if not r.success and r.completed_at is not None)
+    fallback_count = sum(1 for r in runs if r.used_fallback)
+    rag_queries_count = sum(r.rag_queries_count or 0 for r in runs)
+    rag_hits_count = sum(r.rag_hits_count or 0 for r in runs)
+
+    latencies = [r.latency_ms for r in runs if r.success and r.latency_ms is not None]
+    avg_latency_ms = round(sum(latencies) / len(latencies), 2) if latencies else None
+    last_latency_ms = next((r.latency_ms for r in runs if r.latency_ms is not None), None)
+    last_surface = runs[0].surface if runs else None
+
+    last_error_run = next((r for r in runs if not r.success and r.error_message), None)
+    last_error = last_error_run.error_message if last_error_run else None
+    last_error_at = ensure_utc(last_error_run.completed_at or last_error_run.started_at) if last_error_run else None
+
+    return {
+        "chat_count": chat_count,
+        "diagnoses_count": diagnoses_count,
+        "action_count": action_count,
+        "success_count": success_count,
+        "error_count": error_count,
+        "fallback_count": fallback_count,
+        "rag_queries_count": rag_queries_count,
+        "rag_hits_count": rag_hits_count,
+        "avg_latency_ms": avg_latency_ms,
+        "last_latency_ms": last_latency_ms,
+        "last_surface": last_surface,
+        "last_error": last_error,
+        "last_error_at": last_error_at.isoformat() if last_error_at else None,
+    }
+
+
 async def get_stats_summary(db: AsyncSession) -> dict:
     runs = (await db.execute(select(AIRun))).scalars().all()
     feedback_rows = (await db.execute(select(AIFeedback))).scalars().all()

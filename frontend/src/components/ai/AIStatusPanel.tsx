@@ -5,6 +5,7 @@ import { Activity, CheckCircle2, AlertTriangle, XCircle, ChevronDown, BarChart3,
 import api from "@/lib/api";
 import { AIStatsSummary, AIStatus, AIPreference } from "@/types";
 import { getAIPreference, setAIPreference } from "@/lib/aiPreference";
+import { getAISessionStart } from "@/lib/aiSession";
 
 const PROVIDER_LABELS: Record<string, string> = {
   google: "Google",
@@ -19,25 +20,28 @@ export function AIStatusButton() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setPreference(getAIPreference());
-    Promise.all([api.get<AIStatus>("/ai/status"), api.get<AIStatsSummary>("/ai/stats")])
+  const fetchAll = () => {
+    const since = encodeURIComponent(getAISessionStart());
+    Promise.all([
+      api.get<AIStatus>(`/ai/status?since=${since}`),
+      api.get<AIStatsSummary>("/ai/stats"),
+    ])
       .then(([statusRes, statsRes]) => {
         setStatus(statusRes.data);
         setStats(statsRes.data);
       })
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    setPreference(getAIPreference());
+    fetchAll();
   }, []);
 
   // Refresh on open so count is fresh
   const handleOpen = () => {
     setOpen((v) => !v);
-    Promise.all([api.get<AIStatus>("/ai/status"), api.get<AIStatsSummary>("/ai/stats")])
-      .then(([statusRes, statsRes]) => {
-        setStatus(statusRes.data);
-        setStats(statsRes.data);
-      })
-      .catch(() => {});
+    fetchAll();
   };
 
   // Close on outside click

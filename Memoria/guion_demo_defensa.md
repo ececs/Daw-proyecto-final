@@ -117,7 +117,28 @@ Rellenar con estos datos:
 
 ---
 
-## 7. Chat con el agente IA `~2 min`
+## 7. Panel de IA — Estado y selección de modelo `~1 min`
+
+*Antes de usar el agente, quiero mostraros el panel de estado de la IA. Está en la barra superior — ese botón con el icono de actividad y el nombre del modelo.*
+
+**[ACCIÓN: Pulsar el botón de estado IA (icono de actividad + nombre del modelo) en la barra superior]**
+
+*Este panel muestra en tiempo real qué proveedor y modelo está activo. El sistema soporta múltiples proveedores: actualmente Google con Gemini 2.5 Flash y OpenAI con GPT-4o-mini.*
+
+*Lo más interesante es la selección de preferencia: podemos elegir entre "Automático", donde el sistema elige el mejor modelo disponible con fallback automático si uno falla, o forzar un proveedor concreto.*
+
+**[ACCIÓN: Cambiar la preferencia de "Automático" a "GPT-4o-mini" — o al que corresponda según el `.env` activo]**
+
+*Si el modelo primario falla, el sistema hace fallback al secundario de forma transparente — el usuario ni lo nota. El contador de "Fallback used" registra cuántas veces ha ocurrido.*
+
+*Fijaos también en las estadísticas de sesión: mensajes de chat, diagnósticos realizados, acciones de herramientas ejecutadas, latencia media y el porcentaje de aciertos del RAG — es decir, cuántas veces la búsqueda vectorial encontró contexto relevante. Y en la sección histórica, el coste estimado por ejecución en dólares.*
+
+**[ACCIÓN: Cerrar el panel y abrir el chat lateral]**
+
+---
+
+## 8. Chat con el agente IA `~2 min`
+
 
 *Ahora le voy a pedir al agente que haga algo sobre el sistema usando lenguaje natural. Pero primero, voy a aplicar un filtro para que podáis ver el cambio en tiempo real mientras el agente actúa.*
 

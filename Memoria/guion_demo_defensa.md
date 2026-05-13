@@ -131,9 +131,16 @@ Escribir en el chat:
 
 *Las respuestas llegan en streaming mediante Server-Sent Events, token a token, lo que da esa experiencia fluida de escritura en tiempo real. El agente tiene acceso a herramientas como: listar tickets, cambiar estado, añadir comentarios, buscar en la base de conocimiento y crear tickets nuevos.*
 
+*Vamos a verificar que el agente realmente hizo los cambios — no solo lo dice, lo podemos comprobar en tiempo real.*
+
+**[ACCIÓN: Cerrar el chat, ir al panel principal y filtrar por prioridad "Alta" + ordenar por fecha de creación ascendente]**
+
+*Ahí está — el ticket más antiguo de alta prioridad ha cambiado a "En Progreso" y tiene el comentario del agente. El agente no solo razona, actúa sobre el sistema real. Deshago el filtro para continuar.*
+
 > ⚠️ **NOTA si falla en vivo:** Mostrar captura de pantalla preparada. No interrumpas el flujo.
 
 ---
+
 
 ## 8. Diagnóstico IA por ticket `~1.5 min`
 

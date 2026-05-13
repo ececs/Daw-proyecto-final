@@ -1,9 +1,11 @@
 # 🎬 Guion de Demostración en Vivo — D4-Ticket AI
-### Proyecto Final DAW | Demo: ~14 minutos
+
+### Proyecto Final DAW | Demo: ~14-16 minutos
 
 ---
 
 > **Checklist antes de empezar:**
+>
 > - ✅ Navegador en URL de producción (Vercel), pantalla completa
 > - ✅ Segunda pestaña abierta con la misma URL (para demo WebSocket)
 > - ✅ Archivo `tesia_technical_doc.pdf` en el escritorio listo para subir
@@ -27,7 +29,7 @@
 
 ## 2. Panel principal `~30 seg`
 
-*Esta es la pantalla principal. Vemos el tablero de tickets con toda la información relevante de un vistazo: título, prioridad, asignado, fecha de creación y estado.*
+*Esta es la pantalla principal. Vemos el tablero de tickets con toda la información relevante de un vistazo: numero de ticket, titulo, estado, prioridad, asignado y fecha de creación.*
 
 *La vista tiene capacidades de **filtrado y ordenación**: podemos filtrar por estado, prioridad o usuario asignado, y ordenar por cualquier columna de forma ascendente o descendente. Esto permite a los equipos de soporte localizar rápidamente los tickets más urgentes sin tener que revisar toda la lista.*
 
@@ -39,9 +41,9 @@
 
 ## 3. Panel Kanban en tiempo real `~1.5 min`
 
-*Este es el panel Kanban. Los tickets están organizados en columnas según su estado de flujo de trabajo: Por hacer, En progreso, En revisión y Resuelto.*
+*Este es el panel Kanban. Los tickets están organizados en columnas según su estado de flujo de trabajo: open, in progress, in review y closed.*
 
-*El frontend está construido con Next.js 15 y React 19 usando el App Router. El estado del tablero se gestiona con Zustand, que permite que cualquier componente — esté donde esté en la jerarquía — reciba actualizaciones sin pasar datos manualmente de padre a hijo.*
+*El estado del tablero se gestiona con Zustand, que permite que cualquier componente — esté donde esté en la jerarquía — reciba actualizaciones sin pasar datos manualmente de padre a hijo.*
 
 **[ACCIÓN: Arrastrar un ticket de "Por hacer" a "En progreso"]**
 
@@ -55,7 +57,7 @@
 
 ---
 
-## 3. Notificaciones en tiempo real `~30 seg`
+## 4. Notificaciones en tiempo real `~30 seg`
 
 *Fijaos en el icono de campana de la barra superior. Las notificaciones también llegan por WebSocket y se almacenan en la tabla `notifications` de PostgreSQL con su estado de lectura.*
 
@@ -65,7 +67,7 @@
 
 ---
 
-## 4. Creación de ticket en vivo `~2 min`
+## 5. Creación de ticket en vivo `~2 min`
 
 *Voy a crear un ticket nuevo para mostrar el flujo completo.*
 
@@ -73,13 +75,13 @@
 
 Rellenar con estos datos:
 
-| Campo | Valor |
-|-------|-------|
-| **Título** | `Error de login con Google en dispositivos móviles iOS` |
+| Campo           | Valor                                                                                                                                                                                                                                                                                        |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Título**      | `Error de login con Google en dispositivos móviles iOS`                                                                                                                                                                                                                                      |
 | **Descripción** | `Varios usuarios reportan que al intentar autenticarse con Google desde Safari en iPhone, el proceso de OAuth redirige correctamente pero la sesión no persiste. Al volver a la app aparecen como no autenticados. Afecta: iOS 17 + Safari. En Android y escritorio funciona correctamente.` |
-| **Prioridad** | `Alta` |
-| **Estado** | `Por hacer` |
-| **Asignado a** | *(asignarte a ti mismo)* |
+| **Prioridad**   | `Alta`                                                                                                                                                                                                                                                                                       |
+| **Estado**      | `Por hacer`                                                                                                                                                                                                                                                                                  |
+| **Asignado a**  | *(asignarte a ti mismo)*                                                                                                                                                                                                                                                                     |
 
 **[ACCIÓN: Guardar el ticket]**
 
@@ -91,7 +93,7 @@ Rellenar con estos datos:
 
 ---
 
-## 5. URL del cliente y scraping RAG `~1.5 min`
+## 6. URL del cliente y scraping RAG `~1.5 min`
 
 *Dentro del detalle del ticket, veis el campo Client URL con `https://tesia.es`. Cuando este campo se rellena al crear o actualizar un ticket, el sistema lanza automáticamente en segundo plano un proceso de scraping.*
 
@@ -101,7 +103,7 @@ Rellenar con estos datos:
 
 ---
 
-## 6. Adjuntar documento técnico — RAG con PDF `~1.5 min`
+## 7. Adjuntar documento técnico — RAG con PDF `~1.5 min`
 
 *Además de la web, el sistema puede indexar documentos adjuntos. Tengo aquí el PDF con la documentación técnica interna de TesIA.*
 
@@ -117,28 +119,7 @@ Rellenar con estos datos:
 
 ---
 
-## 7. Panel de IA — Estado y selección de modelo `~1 min`
-
-*Antes de usar el agente, quiero mostraros el panel de estado de la IA. Está en la barra superior — ese botón con el icono de actividad y el nombre del modelo.*
-
-**[ACCIÓN: Pulsar el botón de estado IA (icono de actividad + nombre del modelo) en la barra superior]**
-
-*Este panel muestra en tiempo real qué proveedor y modelo está activo. El sistema soporta múltiples proveedores: actualmente Google con Gemini 2.5 Flash y OpenAI con GPT-4o-mini.*
-
-*Lo más interesante es la selección de preferencia: podemos elegir entre "Automático", donde el sistema elige el mejor modelo disponible con fallback automático si uno falla, o forzar un proveedor concreto.*
-
-**[ACCIÓN: Cambiar la preferencia de "Automático" a "GPT-4o-mini" — o al que corresponda según el `.env` activo]**
-
-*Si el modelo primario falla, el sistema hace fallback al secundario de forma transparente — el usuario ni lo nota. El contador de "Fallback used" registra cuántas veces ha ocurrido.*
-
-*Fijaos también en las estadísticas de sesión: mensajes de chat, diagnósticos realizados, acciones de herramientas ejecutadas, latencia media y el porcentaje de aciertos del RAG — es decir, cuántas veces la búsqueda vectorial encontró contexto relevante. Y en la sección histórica, el coste estimado por ejecución en dólares.*
-
-**[ACCIÓN: Cerrar el panel y abrir el chat lateral]**
-
----
-
-## 8. Chat con el agente IA `~2 min`
-
+## 8. Chat con el agente IA — Razonamiento y Human in the Loop `~3 min`
 
 *Ahora le voy a pedir al agente que haga algo sobre el sistema usando lenguaje natural. Pero primero, voy a aplicar un filtro para que podáis ver el cambio en tiempo real mientras el agente actúa.*
 
@@ -174,10 +155,25 @@ Escribir en el chat:
 
 ---
 
+## 9. Panel de IA — Estado y selección de modelo `~1 min`
 
+*Una vez ejecutadas las acciones por parte del agente, quiero mostraros el panel de estado de la IA. Al estar activo en la barra superior, registra métricas de rendimiento reales.*
 
+**[ACCIÓN: Pulsar el botón de estado IA (icono de actividad + nombre del modelo) en la barra superior]**
 
-## 8. Diagnóstico IA por ticket `~1.5 min`
+*Este panel muestra en tiempo real qué proveedor y modelo está activo y las estadísticas del trabajo que acabamos de realizar: mensajes de chat enviados, acciones de herramientas invocadas por el agente y latencia media.*
+
+*Lo más interesante es la selección de preferencia: podemos elegir entre "Automático", donde el sistema elige el mejor modelo disponible con fallback automático si uno falla, o forzar un proveedor concreto.*
+
+**[ACCIÓN: Cambiar la preferencia de "Automático" a "GPT-4o-mini" o "Gemini 2.5 Flash"]**
+
+*Si el modelo primario falla, el sistema hace fallback al secundario de forma transparente — el usuario ni lo nota. El contador de "Fallback used" registraría este evento. También observamos en la sección histórica el coste acumulado estimado por ejecución y la tasa de aciertos (hit rate) del RAG.*
+
+**[ACCIÓN: Cerrar el panel]**
+
+---
+
+## 10. Diagnóstico IA por ticket `~1.5 min`
 
 *Ahora el diagnóstico automático. Desde el detalle de un ticket, el Co-pilot analiza todo el contexto disponible: el título, la descripción, el historial de comentarios, la web del cliente y los adjuntos indexados.*
 
@@ -189,7 +185,7 @@ Escribir en el chat:
 
 ---
 
-## 9. AI Reply — Borrador asistido `~1.5 min`
+## 11. AI Reply — Borrador asistido `~1.5 min`
 
 *Por último, el AI Reply. Permite generar borradores de respuesta profesionales para el cliente final.*
 
@@ -205,7 +201,7 @@ Escribir en el campo de nota del técnico:
 
 ---
 
-## 10. Cierre `~30 seg`
+## 12. Cierre `~30 seg`
 
 *En resumen, D4-Ticket AI integra:*
 
@@ -219,21 +215,22 @@ Escribir en el campo de nota del técnico:
 
 ## ⏱ Tiempos de referencia
 
-| Sección | Tiempo estimado |
-|---------|----------------|
-| 1. Login y modo demo | 1 min |
-| 2. Panel principal + filtros | 30 seg |
-| 3. Kanban + WebSocket en tiempo real | 1.5 min |
-| 4. Notificaciones | 30 seg |
-| 5. Creación de ticket | 2 min |
-| 6. URL cliente + scraping RAG | 1.5 min |
-| 7. Adjuntar PDF + indexación | 1.5 min |
-| 8. Chat con el agente IA + Human in the Loop | 3 min |
-| 9. Diagnóstico IA | 1.5 min |
-| 10. AI Reply | 1.5 min |
-| 11. Cierre | 30 seg |
-| **Total** | **~15 min** |
+| Sección                                       | Tiempo estimado |
+| --------------------------------------------- | --------------- |
+| 1. Login y modo demo                          | 1 min           |
+| 2. Panel principal + filtros                  | 30 seg          |
+| 3. Kanban + WebSocket en tiempo real          | 1.5 min         |
+| 4. Notificaciones                             | 30 seg          |
+| 5. Creación de ticket                         | 2 min           |
+| 6. URL cliente + scraping RAG                 | 1.5 min         |
+| 7. Adjuntar PDF + indexación                  | 1.5 min         |
+| 8. Chat con agente + Human in the Loop        | 3 min           |
+| 9. Panel de IA + Selección de modelo          | 1 min           |
+| 10. Diagnóstico IA                            | 1.5 min         |
+| 11. AI Reply                                  | 1.5 min         |
+| 12. Cierre                                    | 30 seg          |
+| **Total**                                     | **~16 min**     |
 
-> 💡 **Si vas sobrado de tiempo:** Explica más despacio la parte del RAG (§5 y §6) o muestra el Swagger UI (`/docs`) para enseñar los endpoints de la API documentados automáticamente por FastAPI.
+> 💡 **Si vas sobrado de tiempo:** Explica más despacio la parte del RAG (§6 y §7) o muestra el Swagger UI (`/docs`) para enseñar los endpoints de la API documentados automáticamente por FastAPI.
 >
-> 💡 **Si vas justo:** Fusiona §3 (notificaciones) con §2 y menciona §5 (URL cliente) de pasada sin detenerte.
+> 💡 **Si vas justo:** Fusiona §4 (notificaciones) con §3, o salta el panel de IA (§9) mencionando el cambio de modelo rápidamente de palabra mientras escribes en el chat.

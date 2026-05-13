@@ -174,7 +174,13 @@ async def auth_callback(
 @router.post("/logout", summary="Invalidate session")
 async def logout(response: Response):
     """Clear the JWT cookie, logging the user out."""
-    response.delete_cookie("access_token")
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        secure=_is_https,
+        samesite="lax",
+        httponly=True,
+    )
     return {"message": "Logged out successfully"}
 
 

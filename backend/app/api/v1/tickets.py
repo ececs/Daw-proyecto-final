@@ -384,11 +384,18 @@ async def get_ticket_web_context(
     db: DB,
     current_user: CurrentUser,
 ):
-    """Fetches the latest AI-extracted web context for this ticket."""
+    """Fetches the latest AI-extracted web context for this ticket.
+
+    Filters on metadata.type so attachments ingested into the same knowledge
+    base do not shadow the scrape result.
+    """
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     result = await db.execute(
         select(KnowledgeChunk)
-        .where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket.id))
+        .where(
+            func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket.id),
+            func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "type") == "client_web_context",
+        )
         .order_by(KnowledgeChunk.created_at.desc())
         .limit(1)
     )

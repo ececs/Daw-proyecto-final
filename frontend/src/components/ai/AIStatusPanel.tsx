@@ -149,7 +149,7 @@ export function AIStatusButton() {
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Historical stats</p>
               <Metric icon={BarChart3} label="Total runs" value={stats.total_runs} />
               <Metric icon={Clock3} label="Closed with AI" value={stats.tickets_closed_with_ai} />
-              <Metric icon={Search} label="RAG hit rate" value={`${Math.round(stats.rag_hit_rate * 100)}%`} />
+              <Metric icon={Search} label="RAG hit rate" value={`${Math.min(100, Math.round(stats.rag_hit_rate * 100))}%`} />
               <Metric icon={ThumbsUp} label="Helped" value={`${Math.round(stats.helped_rate * 100)}%`} />
               <Row label="Total cost" value={`$${stats.total_estimated_cost_usd.toFixed(4)}`} />
               <Row label="Cost / run" value={`$${stats.avg_cost_per_run_usd.toFixed(4)}`} />

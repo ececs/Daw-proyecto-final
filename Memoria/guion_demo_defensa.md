@@ -231,6 +231,44 @@ Escribir en el campo de nota del técnico:
 | 12. Cierre                                    | 30 seg          |
 | **Total**                                     | **~16 min**     |
 
-> 💡 **Si vas sobrado de tiempo:** Explica más despacio la parte del RAG (§6 y §7) o muestra el Swagger UI (`/docs`) para enseñar los endpoints de la API documentados automáticamente por FastAPI.
+> 💡 **Si vas sobrado de tiempo:** Explica más despacio la parte del RAG (§6 y §7) o usa el guion extra que aparece abajo para mostrar el Swagger UI (`/docs`) y enseñar los endpoints de la API.
 >
 > 💡 **Si vas justo:** Fusiona §4 (notificaciones) con §3, o salta el panel de IA (§9) mencionando el cambio de modelo rápidamente de palabra mientras escribes en el chat.
+
+---
+
+# 📜 Guion Extra Opcional: Interfaz Swagger e Integración de API `~2 min`
+
+*(Utiliza esta sección al final de la demo si vas sobrado de tiempo o durante la ronda de preguntas del tribunal para demostrar fortaleza técnica).*
+
+### 1. Introducción y Autogeneración `~30 seg`
+
+*"Para finalizar, me gustaría mostrarles brevemente el núcleo de nuestro backend y cómo se comunica con el frontend. Gracias a **FastAPI**, no hemos tenido que redactar documentación manual propensa a errores."*
+
+**[ACCIÓN: Abrir una pestaña nueva en el navegador con la URL: `https://proyectodaw-production-b679.up.railway.app/docs`]**
+
+*"Esta es la interfaz interactiva de **Swagger UI**, que se autogenera en tiempo real leyendo las clases de Python y los tipados estáticos del código. Está completamente disponible en producción bajo el estándar abierto **OpenAPI 3.0**."*
+
+### 2. Organización Arquitectónica `~30 seg`
+
+*"Como pueden ver, toda la API está estructurada y versionada en `/api/v1`. Los endpoints están agrupados lógicamente por dominio:"*
+
+**[ACCIÓN: Hacer scroll suave hacia abajo señalando los bloques de endpoints]**
+
+*"Tenemos el bloque de `Auth` para la autenticación con cookies seguras, `Tickets` para la lógica principal de negocio, `Comments` y `Attachments` vinculados al almacenamiento en la nube de Cloudflare R2, y los controladores de `AI` que gestionan el agente conversacional y el motor de RAG."*
+
+### 3. Demostración Interactiva en Vivo `~40 seg`
+
+*"Lo más potente no es solo que documenta, sino que es **completamente interactiva**. Vamos a realizar una prueba en vivo contra el servidor de producción."*
+
+**[ACCIÓN: Buscar y desplegar el endpoint `GET /health` (abajo del todo en la sección "Health")]**
+
+**[ACCIÓN: Pulsar el botón "Try it out" y luego el botón azul grande "Execute"]**
+
+*"Al ejecutarlo, vemos instantáneamente la petición CURL real generada y la respuesta HTTP 200 del servidor en formato JSON. Esto facilita enormemente la depuración del sistema y la integración de futuros desarrolladores en el equipo."*
+
+### 4. Validación con Pydantic y Conclusión `~20 seg`
+
+**[ACCIÓN: Hacer scroll rápido hasta el final de la página, a la sección "Schemas"]**
+
+*"Por último, abajo vemos los **Schemas**. FastAPI utiliza la librería **Pydantic** para validar los datos tipados. Cualquier petición que no cumpla exactamente con estas estructuras (tipos incorrectos, campos obligatorios omitidos) es rechazada automáticamente por el backend con un error HTTP 422 de validación sin llegar a tocar la base de datos, lo que nos aporta una capa de seguridad y robustez nativa excelente."*

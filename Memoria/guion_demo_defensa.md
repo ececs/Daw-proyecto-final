@@ -209,7 +209,7 @@ Escribir en el campo de nota del técnico:
 - *Sistema RAG que indexa webs y documentos PDF/DOCX en pgvector para dar memoria al agente*
 - *Agente de IA con razonamiento ReAct orquestado por LangGraph*
 - *Diagnóstico automático y generación de respuestas asistida por LLM*
-- *Todo en producción: Next.js en Vercel, FastAPI en Railway, PostgreSQL + pgvector como único almacén relacional y vectorial*
+- *Todo en producción: Next.js en Vercel (con Vercel Analytics integrado para monitorización de tráfico en tiempo real), FastAPI en Railway, PostgreSQL + pgvector como único almacén relacional y vectorial*
 
 ---
 

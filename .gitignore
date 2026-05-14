@@ -41,6 +41,7 @@ htmlcov/
 # Private Docs
 docs_private/
 docs_assets/
+Memoria/
 
 # AI Assistant Settings
 .claude/

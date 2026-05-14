@@ -154,35 +154,14 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
     fetchData();
   }, [ticketId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // AI stats load lazily when the stats section scrolls into view, so they
-  // don't compete with ticket/comments/attachments on the critical first load.
-  // Safety fallback: if the IntersectionObserver doesn't fire (panel already
-  // in viewport at mount, very tall tickets where it's just below the fold,
-  // or browsers that miss the initial intersection), force the fetch after a
-  // short delay so the panel never gets stuck on its initial empty state.
+  // AI stats are fetched once the ticket itself has loaded. We can't use an
+  // IntersectionObserver here because the panel isn't mounted while
+  // isLoading=true (the component renders a spinner instead), so the ref
+  // would never be attached and the observer would never fire.
   useEffect(() => {
-    const el = aiStatsRef.current;
-    if (!el) return;
-    let fired = false;
-    const fire = () => {
-      if (fired) return;
-      fired = true;
-      observer.disconnect();
-      void fetchAITicketStats();
-    };
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) fire();
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(el);
-    const fallback = window.setTimeout(fire, 2000);
-    return () => {
-      observer.disconnect();
-      window.clearTimeout(fallback);
-    };
-  }, [ticketId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (isLoading || !ticket) return;
+    void fetchAITicketStats();
+  }, [ticketId, isLoading, ticket?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Real-time refresh listener (WebSockets)
   useEffect(() => {

@@ -33,6 +33,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, DB
@@ -157,22 +158,35 @@ def _make_friendly_error(error_msg: str) -> str:
 async def _resolve_ticket_id_for_chat(
     request: ChatRequest, db: AsyncSession
 ) -> uuid.UUID | None:
-    candidate: uuid.UUID | None = None
-    if request.current_ticket_id:
-        try:
-            candidate = uuid.UUID(request.current_ticket_id)
-        except ValueError:
-            candidate = None
-    if candidate is None and request.selected_ticket_ids and len(request.selected_ticket_ids) == 1:
-        try:
-            candidate = uuid.UUID(request.selected_ticket_ids[0])
-        except ValueError:
-            candidate = None
-    if candidate is None:
-        return None
     from app.models.ticket import Ticket
-    exists = await db.get(Ticket, candidate)
-    return candidate if exists is not None else None
+
+    async def resolve_ref(ref: str) -> uuid.UUID | None:
+        # Try ticket number first (e.g. "42")
+        try:
+            number = int(ref)
+            result = await db.execute(
+                select(Ticket).where(Ticket.ticket_number == number)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                return row.id
+        except (ValueError, Exception):
+            pass
+        # Fall back to UUID
+        try:
+            uid = uuid.UUID(ref)
+            exists = await db.get(Ticket, uid)
+            return uid if exists is not None else None
+        except ValueError:
+            return None
+
+    if request.current_ticket_id:
+        result = await resolve_ref(request.current_ticket_id)
+        if result:
+            return result
+    if request.selected_ticket_ids and len(request.selected_ticket_ids) == 1:
+        return await resolve_ref(request.selected_ticket_ids[0])
+    return None
 
 
 # ---------------------------------------------------------------------------

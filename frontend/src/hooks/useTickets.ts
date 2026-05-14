@@ -29,6 +29,7 @@ interface UseTicketsReturn {
   isLoading: boolean;
   error: string | null;
   refetch: () => void;
+  insertTicket: (ticket: Ticket) => void;
   updateTicketStatus: (ticketId: string, newStatus: TicketStatus) => Promise<void>;
   updateTicket: (ticketId: string, data: TicketUpdate) => Promise<Ticket>;
   deleteTicket: (ticketId: string) => Promise<void>;
@@ -43,6 +44,28 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
   const { toast } = useToast();
 
   const refetch = useCallback(() => setFetchKey((k) => k + 1), []);
+
+  // Locally insert a ticket created from this client (e.g. via the form modal).
+  // Avoids a full reload by reusing the same merge helper as the realtime path.
+  // The WS broadcast triggered by the same POST is a no-op once the ticket is
+  // already in `tickets` (integrateCreatedTicket detects duplicates).
+  const insertTicket = useCallback((ticket: Ticket) => {
+    setTickets((prev) => {
+      if (prev.some((t) => t.id === ticket.id)) {
+        return prev.map((t) => (t.id === ticket.id ? ticket : t));
+      }
+      const merged = integrateCreatedTicket(prev, ticket, filters);
+      if (merged.needsRefetch) {
+        refetch();
+        return prev;
+      }
+      if (merged.totalDelta !== 0) {
+        setTotal((n) => n + merged.totalDelta);
+      }
+      return merged.tickets;
+    });
+  }, [filters, refetch]);
+
   const refreshSignal = useNotificationStore((s) => s.refreshSignal);
   const lastTicketId = useNotificationStore((s) => s.lastTicketId);
   const deletedTicketId = useNotificationStore((s) => s.deletedTicketId);
@@ -214,5 +237,5 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
     }
   }, [tickets, toast]);
 
-  return { tickets, total, isLoading, error, refetch, updateTicketStatus, updateTicket, deleteTicket };
+  return { tickets, total, isLoading, error, refetch, insertTicket, updateTicketStatus, updateTicket, deleteTicket };
 }

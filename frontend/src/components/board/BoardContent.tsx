@@ -31,13 +31,14 @@ export function BoardContent() {
   const [filters, setFilters] = useState<TicketFilters>({ page: 1, size: 20 });
   const [showForm, setShowForm] = useState(false);
 
-  const { tickets, total, isLoading, updateTicketStatus, deleteTicket, refetch } =
+  const { tickets, total, isLoading, updateTicketStatus, deleteTicket, insertTicket } =
     useTickets(filters);
   const { users } = useUsers();
 
   const handleCreateSuccess = (ticket: Ticket) => {
-    refetch(); // Re-fetch after creation to pick up the server-assigned values
-    void ticket; // ticket is returned by the API but we re-fetch for consistency
+    // Merge the new row locally. The WS broadcast triggered by the same POST
+    // will be deduped by insertTicket, so no full reload is needed.
+    insertTicket(ticket);
   };
 
   return (

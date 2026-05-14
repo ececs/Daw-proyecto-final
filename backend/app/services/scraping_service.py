@@ -89,13 +89,18 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
                 }
             )
             db.add(chunk)
-            
-            # 4.2 Fetch ticket users to notify via WebSocket
+
+            # 4.2 Seed client_summary on first scrape only — never overwrite a
+            # human-edited summary on subsequent refreshes.
             from app.models.ticket import Ticket
             from sqlalchemy import select
             ticket_res = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
             ticket = ticket_res.scalar_one_or_none()
-            
+
+            if ticket and not (ticket.client_summary or "").strip():
+                snippet = content[:1500].strip()
+                ticket.client_summary = snippet
+
             await db.commit()
             
         # 5. Notify via WebSocket (Live UI update) + persist notification

@@ -87,8 +87,8 @@ export function useWebSocket(token: string | null) {
               if (ticket_id) {
                 triggerRefresh(String(ticket_id));
                 toast({
-                  title: "Análisis Web Finalizado",
-                  description: message || "La IA ha terminado de analizar la URL del cliente.",
+                  title: "Web analysis finished",
+                  description: message || "The AI has finished analyzing the client URL.",
                   variant: "success",
                 });
               }

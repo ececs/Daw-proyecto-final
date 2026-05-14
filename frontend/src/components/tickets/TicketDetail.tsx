@@ -116,6 +116,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [aiTicketStats, setAiTicketStats] = useState<AITicketStats | null>(null);
   const [isLoadingAITicketStats, setIsLoadingAITicketStats] = useState(false);
+  const [aiStatsError, setAiStatsError] = useState<string | null>(null);
   const [confirmDeleteAttachmentId, setConfirmDeleteAttachmentId] = useState<string | null>(null);
   
   const commentTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -155,20 +156,32 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
 
   // AI stats load lazily when the stats section scrolls into view, so they
   // don't compete with ticket/comments/attachments on the critical first load.
+  // Safety fallback: if the IntersectionObserver doesn't fire (panel already
+  // in viewport at mount, very tall tickets where it's just below the fold,
+  // or browsers that miss the initial intersection), force the fetch after a
+  // short delay so the panel never gets stuck on its initial empty state.
   useEffect(() => {
     const el = aiStatsRef.current;
     if (!el) return;
+    let fired = false;
+    const fire = () => {
+      if (fired) return;
+      fired = true;
+      observer.disconnect();
+      void fetchAITicketStats();
+    };
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
-          observer.disconnect();
-          void fetchAITicketStats();
-        }
+        if (entry.isIntersecting) fire();
       },
       { rootMargin: "200px" }
     );
     observer.observe(el);
-    return () => observer.disconnect();
+    const fallback = window.setTimeout(fire, 2000);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(fallback);
+    };
   }, [ticketId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Real-time refresh listener (WebSockets)
@@ -226,11 +239,13 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
   const fetchAITicketStats = useCallback(async () => {
     if (!ticketId || ticketId === "None" || ticketId === "undefined") return;
     setIsLoadingAITicketStats(true);
+    setAiStatsError(null);
     try {
       const { data } = await api.get<AITicketStats>(`/ai/stats/tickets/${ticketId}`);
       setAiTicketStats(data);
     } catch (err) {
       console.error("Failed to load AI ticket stats", err);
+      setAiStatsError("Couldn't load AI stats for this ticket.");
     } finally {
       setIsLoadingAITicketStats(false);
     }
@@ -1097,49 +1112,69 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
               {isLoadingAITicketStats && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
             </div>
             {aiTicketStats ? (
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Diagnoses</p>
-                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.diagnosis_runs}</p>
+              <>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-slate-500">Diagnoses</p>
+                    <p className="text-sm font-semibold text-slate-800">{aiTicketStats.diagnosis_runs}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-slate-500">Linked chats</p>
+                    <p className="text-sm font-semibold text-slate-800">{aiTicketStats.chat_runs}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-slate-500">RAG queries</p>
+                    <p className="text-sm font-semibold text-slate-800">{aiTicketStats.rag_queries_count}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-slate-500">RAG hit rate</p>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {Math.min(100, Math.round(aiTicketStats.rag_hit_rate * 100))}%
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-slate-500">Positive feedback</p>
+                    <p className="text-sm font-semibold text-slate-800">{aiTicketStats.positive_feedback_count}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <p className="text-slate-500">Estimated cost</p>
+                    <p className="text-sm font-semibold text-slate-800">${aiTicketStats.estimated_cost_usd.toFixed(4)}</p>
+                  </div>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Linked chats</p>
-                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.chat_runs}</p>
+                {aiTicketStats.diagnosis_runs === 0 &&
+                  aiTicketStats.chat_runs === 0 &&
+                  aiTicketStats.rag_queries_count === 0 && (
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      This ticket hasn&apos;t been used with Diagnose or the AI chat yet.
+                    </p>
+                  )}
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                  <span>
+                    Last used: {aiTicketStats.last_ai_used_at ? formatDateTime(aiTicketStats.last_ai_used_at) : "—"}
+                  </span>
+                  <span>
+                    Time to close: {aiTicketStats.time_to_close_hours !== null ? `${aiTicketStats.time_to_close_hours} h` : "Open"}
+                  </span>
+                  <span>
+                    Overall help: {aiTicketStats.helped === null ? "No feedback" : aiTicketStats.helped ? "Positive" : "Negative"}
+                  </span>
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">RAG queries</p>
-                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.rag_queries_count}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">RAG hit rate</p>
-                  <p className="text-sm font-semibold text-slate-800">
-                    {Math.min(100, Math.round(aiTicketStats.rag_hit_rate * 100))}%
-                  </p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Positive feedback</p>
-                  <p className="text-sm font-semibold text-slate-800">{aiTicketStats.positive_feedback_count}</p>
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                  <p className="text-slate-500">Estimated cost</p>
-                  <p className="text-sm font-semibold text-slate-800">${aiTicketStats.estimated_cost_usd.toFixed(4)}</p>
-                </div>
+              </>
+            ) : aiStatsError ? (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                <p className="text-sm text-amber-800">{aiStatsError}</p>
+                <button
+                  type="button"
+                  onClick={() => void fetchAITicketStats()}
+                  className="text-xs font-medium text-amber-900 underline hover:text-amber-700"
+                >
+                  Retry
+                </button>
               </div>
+            ) : isLoadingAITicketStats ? (
+              <p className="text-sm text-slate-400">Loading…</p>
             ) : (
-              <p className="text-sm text-slate-500">No AI activity recorded on this ticket yet.</p>
-            )}
-            {aiTicketStats && (
-              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                <span>
-                  Last used: {aiTicketStats.last_ai_used_at ? formatDateTime(aiTicketStats.last_ai_used_at) : "—"}
-                </span>
-                <span>
-                  Time to close: {aiTicketStats.time_to_close_hours !== null ? `${aiTicketStats.time_to_close_hours} h` : "Open"}
-                </span>
-                <span>
-                  Overall help: {aiTicketStats.helped === null ? "No feedback" : aiTicketStats.helped ? "Positive" : "Negative"}
-                </span>
-              </div>
+              <p className="text-sm text-slate-400">Loading…</p>
             )}
           </div>
 

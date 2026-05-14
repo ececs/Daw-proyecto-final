@@ -388,7 +388,13 @@ async def get_ticket_ai_stats(ticket_ref: str, db: DB, current_user: CurrentUser
     ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    return await ai_metrics_service.get_ticket_stats(db, ticket.id)
+    try:
+        return await ai_metrics_service.get_ticket_stats(db, ticket.id)
+    except Exception:
+        logging.getLogger("uvicorn.error").exception(
+            "get_ticket_ai_stats failed for ticket %s (ref=%s)", ticket.id, ticket_ref
+        )
+        raise
 
 
 @router.post("/feedback")

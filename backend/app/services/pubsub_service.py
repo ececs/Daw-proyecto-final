@@ -1,19 +1,9 @@
-"""
-Pub/Sub transport abstraction for real-time WebSocket notifications.
+"""Real-time horizontal Pub/Sub distribution layer.
 
-Two transports supported:
-  - Redis Pub/Sub (primary): horizontally scalable — all backend instances
-    subscribe to the same Redis channel, so a NOTIFY from instance A reaches
-    WebSocket clients on instance B.
-  - PostgreSQL LISTEN/NOTIFY (fallback): single-instance, no Redis required.
-    Used automatically when REDIS_URL is not set.
-
-The transport is selected at startup in main.py by calling start_listen_loop().
-notification_service.py calls publish() without knowing which transport is active.
-
-Redis channel: "notifications"
-PG channel:    "notifications"
-Payload:       JSON string {"user_id": "...", "id": "...", ...}
+Multiplexes distributed real-time WebSocket notifications across horizontally
+scaled API instances. Implements primary delivery via Redis channels,
+gracefully reverting back to single-instance Postgres LISTEN/NOTIFY protocols
+when operating in isolated staging/development topologies.
 """
 
 import asyncio
@@ -27,11 +17,13 @@ CHANNEL = "notifications"
 
 
 async def publish(payload: dict) -> None:
-    """
-    Publish a notification payload to connected WebSocket clients.
-    
-    The payload is expected to be a dictionary that can be converted
-    to a NotificationPayload schema (or already validated).
+    """Publishes dynamic JSON envelopes to the designated distribution network.
+
+    Prioritizes distributed cluster publishing; seamlessly routes to Postgres
+    listener functions if standalone fallbacks are active.
+
+    Args:
+        payload: Content dictionary mapping properties of a valid NotificationPayload.
     """
     from app.services.cache_service import _redis
 
@@ -42,18 +34,17 @@ async def publish(payload: dict) -> None:
         except Exception as exc:
             logger.warning("Redis publish failed, falling back to PG NOTIFY: %s", exc)
 
-    # PG NOTIFY fallback — db session injected by notification_service
     _pg_notify_fn = payload.pop("_pg_notify_fn", None)
     if _pg_notify_fn is not None:
         await _pg_notify_fn(payload)
 
 
 async def redis_listen_loop() -> None:
-    """
-    Background task: subscribe to Redis pub/sub and push to WebSocket clients.
+    """Background asynchronous daemon subscribing to real-time network events.
 
-    Runs for the lifetime of the application. Reconnects on transient errors.
-    Only started when REDIS_URL is set and Redis is reachable.
+    Listens to global Redis notifications streams, extracting contextual
+    user identifiers before dispatching structured messages down individual
+    client WebSocket manager tunnels.
     """
     from app.services.cache_service import _redis
     from app.core.websocket_manager import manager
@@ -72,12 +63,10 @@ async def redis_listen_loop() -> None:
                 continue
             try:
                 raw_data = json.loads(message["data"])
-                # Extract user_id which is used for routing but not part of WSMessage
                 user_id = raw_data.pop("user_id", None)
                 if not user_id:
                     continue
                 
-                # Validate the rest as a WSMessage
                 from app.schemas.websocket import WSMessage
                 ws_msg = WSMessage(**raw_data)
                 if user_id == "*":
@@ -99,6 +88,6 @@ async def redis_listen_loop() -> None:
 
 
 def is_redis_available() -> bool:
-    """Return True if the Redis client is connected (for transport selection)."""
+    """Verifies runtime Redis client availability to determine active transport layers."""
     from app.services.cache_service import _redis
     return _redis is not None

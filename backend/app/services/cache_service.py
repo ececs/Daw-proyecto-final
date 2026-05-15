@@ -1,16 +1,7 @@
-"""
-Redis cache service — optional caching layer for read-heavy endpoints.
+"""Distributed Redis caching and rate-limiting provider.
 
-Graceful degradation: if REDIS_URL is not set or Redis is unreachable,
-all cache operations are no-ops and callers fall through to the database.
-
-Usage:
-    value = await cache_get(key)
-    if value is None:
-        value = await expensive_query()
-        await cache_set(key, value, ttl=60)
-
-    await cache_invalidate_prefix("tickets:")  # on write
+Implements a high-performance intermediate storage layer with automatic graceful
+degradation to standalone database execution if the Redis server becomes unreachable.
 """
 
 import json
@@ -23,7 +14,11 @@ _redis: Any = None
 
 
 async def init_cache() -> None:
-    """Connect to Redis at startup. No-op if REDIS_URL is not set."""
+    """Establishes an asynchronous TCP connection to the Redis Cache Cluster.
+
+    Exits silently (no-op) if the cluster connection endpoint configuration
+    remains absent from the system environment settings.
+    """
     global _redis
     from app.core.config import settings
 
@@ -48,7 +43,7 @@ async def init_cache() -> None:
 
 
 async def close_cache() -> None:
-    """Close the Redis connection at shutdown."""
+    """Closes existing pool resources releasing the active Redis connection."""
     global _redis
     if _redis is not None:
         await _redis.aclose()
@@ -56,7 +51,11 @@ async def close_cache() -> None:
 
 
 async def cache_get(key: str) -> Optional[Any]:
-    """Return cached value or None if missing / Redis unavailable."""
+    """Retrieves and deserializes JSON values bound to a string key.
+
+    Returns:
+        Optional[Any]: Parsed JSON values if found, otherwise None.
+    """
     if _redis is None:
         return None
     try:
@@ -68,7 +67,13 @@ async def cache_get(key: str) -> Optional[Any]:
 
 
 async def cache_set(key: str, value: Any, ttl: int = 60) -> None:
-    """Store value with TTL (seconds). No-op if Redis unavailable."""
+    """Serializes and persists an arbitrary value bound to an expiration TTL.
+
+    Args:
+        key: Primary cache key string identifier.
+        value: The Python object or dictionary to serialize.
+        ttl: Relative time-to-live constraint in seconds.
+    """
     if _redis is None:
         return
     try:
@@ -78,7 +83,7 @@ async def cache_set(key: str, value: Any, ttl: int = 60) -> None:
 
 
 async def cache_invalidate_prefix(prefix: str) -> None:
-    """Delete all keys matching `prefix*`. No-op if Redis unavailable."""
+    """Atomically purges keys sharing a common namespace prefix reference."""
     if _redis is None:
         return
     try:
@@ -90,20 +95,21 @@ async def cache_invalidate_prefix(prefix: str) -> None:
 
 
 async def is_rate_limited(key: str, limit: int, window: int) -> bool:
-    """
-    Check if a key (e.g. IP or action_type:id) has exceeded a limit within a window (seconds).
-    
-    How it works (Fixed Window):
-      1. INCR the key.
-      2. If it's the first hit (value == 1), set the expiration (window).
-      3. If current value > limit, return True.
-    
-    If Redis is unavailable, this always returns False (graceful degradation).
+    """Verifies if an identified key exceeds access quotas within a sliding window.
+
+    Utilizes a fixed-window counter paradigm leveraging atomic increments.
+
+    Args:
+        key: Tracking identifier (e.g., client IP, endpoint name).
+        limit: The maximum requests permitted inside the designated window.
+        window: Time-frame constraint span in seconds.
+
+    Returns:
+        bool: True if the requesting entity has surpassed their threshold.
     """
     if _redis is None:
         return False
     try:
-        # Key prefix for rate limiting to avoid collision with cache keys
         rl_key = f"rl:{key}"
         current = await _redis.incr(rl_key)
         if current == 1:

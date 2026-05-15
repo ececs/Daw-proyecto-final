@@ -1,3 +1,9 @@
+"""Ticket audit trail history model mapping.
+
+Ensures compliance and lifecycle visibility by creating chronological changelog
+deltas for audited ticket attributes whenever core work items undergo mutation.
+"""
+
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -12,6 +18,13 @@ if TYPE_CHECKING:
 
 
 class TicketHistory(Base):
+    """Represents a single discrete field state transition within a ticket's lifecycle.
+
+    Maintains a robust historical audit footprint, capturing previous and updated values.
+    Uses 'SET NULL' defaults to ensure history logs persist even if the originating
+    ticket or mutating actor is deleted from the platform.
+    """
+
     __tablename__ = "ticket_history"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

@@ -1,22 +1,9 @@
-"""
-Notification service.
+"""Enterprise-grade real-time notification distribution manager.
 
-Centralizes all notification creation logic. When a ticket is assigned,
-a comment is added, or a status changes, this service:
-  1. Creates a Notification row in the database for each affected user.
-  2. Sends a PostgreSQL NOTIFY so the background listener pushes the
-     notification to any connected WebSocket clients in real time.
-
-Why separate this into a service?
-  - The same notification logic is needed from multiple routers
-    (tickets, comments). A service avoids code duplication.
-  - It makes the routers thin (HTTP concerns only) and the business
-    logic testable in isolation.
-
-PostgreSQL NOTIFY channel: "notifications"
-  Payload: JSON string with user_id, notification data, and type.
-  The asyncpg listener in main.py receives this and calls
-  websocket_manager.broadcast_to_user().
+Coordinates the multi-channel publication of incident alerts and ticket event triggers.
+Utilizes Redis Pub/Sub for horizontally scalable real-time delivery, seamlessly reverting 
+back to single-instance PostgreSQL LISTEN/NOTIFY protocols for standalone environments. 
+Aggregates event persistence and provides transactional delivery guarantees.
 """
 
 import json
@@ -37,7 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _pg_notify(db: AsyncSession, user_id: str, payload: dict) -> None:
-    """Send a raw PostgreSQL NOTIFY — used as fallback when Redis is unavailable."""
+    """Transmits direct SQL database NOTIFY calls over isolated local notifications channels.
+
+    Executed exclusively as the fallback transport mechanism when Redis pooling is offline.
+    """
     payload["user_id"] = user_id
     payload_str = json.dumps(payload, default=str)
     await db.execute(
@@ -51,7 +41,10 @@ async def _publish_user_event(
     user_id: uuid.UUID,
     ws_msg: WSMessage,
 ) -> None:
-    """Broadcast a user-scoped WebSocket event via Redis or PG NOTIFY fallback."""
+    """Directs message packets toward active client transport layers via PubSub/SQL.
+
+    Verifies the primary distributed cache state before determining active route logic.
+    """
     event = ws_msg.model_dump(mode="json")
     event["user_id"] = str(user_id)
 
@@ -70,18 +63,13 @@ async def _create_notification(
     ticket_id: uuid.UUID | None,
     message: str,
 ) -> Notification:
-    """
-    Persist a Notification to the database and push it via WebSocket.
+    """Appends an alert entity to physical storage and triggers instant distribution alerts.
 
-    Args:
-        db: Database session (caller is responsible for commit).
-        user_id: The user who should receive this notification.
-        notification_type: The kind of event that triggered it.
-        ticket_id: The related ticket (for click-through in the UI), if any.
-        message: Human-readable description shown in the notifications panel.
+    Ensures the underlying entity generates an artificial identifier before initiating
+    downstream publish actions, and dynamically calculates fresh unread statistics counters.
 
     Returns:
-        The created Notification object (before commit).
+        Notification: The flushed ORM instance ready for primary transaction finalization.
     """
     notification = Notification(
         user_id=user_id,
@@ -90,14 +78,10 @@ async def _create_notification(
         message=message,
     )
     db.add(notification)
-    # Flush so the notification gets an id before we send NOTIFY
     await db.flush()
 
-    # Get updated unread count for this user
     unread_count = await get_unread_count(db, user_id)
 
-    # Publish to connected WebSocket clients (Redis Pub/Sub or PG NOTIFY fallback)
-    # Prepare the payload for real-time delivery
     from app.schemas.websocket import WSMessage, WSMessageType
     
     ws_msg = WSMessage(
@@ -128,12 +112,7 @@ async def notify_rag_indexed(
     assignee_id: uuid.UUID | None,
     message: str,
 ) -> None:
-    """
-    Persist a "RAG content ready" notification for the ticket stakeholders.
-
-    Used when a background task (URL scrape, attachment ingestion) finishes
-    indexing content into the knowledge base so the assistant can use it.
-    """
+    """Broadcasts completion telemetry alerting users that background RAG jobs concluded."""
     users_to_notify = {author_id}
     if assignee_id:
         users_to_notify.add(assignee_id)
@@ -153,9 +132,7 @@ async def notify_ticket_created(
     ticket: Ticket,
     actor: User,
 ) -> None:
-    """
-    Notify the author and the assignee when a new ticket is created.
-    """
+    """Alerts creators and direct assignees upon the initialization of new ticket entities."""
     users_to_notify = {ticket.author_id}
     if ticket.assignee_id:
         users_to_notify.add(ticket.assignee_id)
@@ -176,10 +153,7 @@ async def notify_ticket_deleted(
     ticket_title: str,
     actor: User,
 ) -> None:
-    """
-    Notify the actor that the ticket has been deleted.
-    Provides a persistent notification record in the history.
-    """
+    """Dispatches historical alert confirmation documenting hard object deletion cycles."""
     await _create_notification(
         db,
         user_id=actor.id,
@@ -194,9 +168,7 @@ async def notify_ticket_deletion_requested(
     ticket: Ticket,
     requester: User,
 ) -> None:
-    """
-    Notify the ticket author that another user asked them to delete the ticket.
-    """
+    """Requests authority validation from creators concerning deletion solicitations."""
     if ticket.author_id == requester.id:
         return
 
@@ -215,6 +187,7 @@ async def notify_ticket_assigned(
     assignee: User,
     actor: User,
 ) -> None:
+    """Apprises identified user profiles regarding newly bound assignment directives."""
     await _create_notification(
         db,
         user_id=assignee.id,
@@ -229,6 +202,7 @@ async def notify_comment_added(
     ticket: Ticket,
     commenter: User,
 ) -> None:
+    """Alerts interested stakeholders whenever updated commentary spans are submitted."""
     users_to_notify: set[uuid.UUID] = set()
 
     users_to_notify.add(ticket.author_id)
@@ -252,7 +226,7 @@ async def notify_priority_changed(
     actor: User,
     new_priority: str,
 ) -> None:
-    """Notify the ticket author and assignee when the ticket priority changes."""
+    """Fires prioritized transition signals tracking importance rank migrations."""
     priority_str = new_priority.value if hasattr(new_priority, "value") else new_priority
     priority_label = priority_str.replace("_", " ").title()
     message = f'{actor.name} changed priority of "{ticket.title}" to {priority_label}'
@@ -278,15 +252,7 @@ async def notify_status_changed(
     actor: User,
     new_status: str,
 ) -> None:
-    """
-    Notify the ticket author and assignee when the ticket status changes.
-
-    Args:
-        db: Database session.
-        ticket: The ticket whose status changed.
-        actor: The user who made the change.
-        new_status: The new status value (for display in the message).
-    """
+    """Broadcasts status workflow progressions spanning from registration to resolution."""
     status_str = new_status.value if hasattr(new_status, "value") else new_status
     status_label = status_str.replace("_", " ").title()
     message = f'{actor.name} changed "{ticket.title}" to {status_label}'
@@ -313,10 +279,9 @@ async def broadcast_global_event(
     data: Optional[Dict[str, Any]] = None,
     db: Optional[AsyncSession] = None
 ) -> None:
-    """
-    Push a real-time event to ALL connected users.
-    Uses Redis Pub/Sub when available and PG NOTIFY fallback otherwise, so the
-    broadcast works across multiple workers/processes.
+    """Emits broadcast events to every active WebSocket connection instance.
+
+    Targets a specialized user wild-card '*' matching universal dispatch tunnels.
     """
     from app.schemas.websocket import WSMessage
     from app.services import pubsub_service
@@ -330,7 +295,7 @@ async def broadcast_global_event(
         await pubsub_service.publish(event)
     elif db is not None:
         await _pg_notify(db, "*", event)
-        await db.commit()  # flush PG NOTIFY fallback
+        await db.commit()
     else:
         logger.warning("Global broadcast skipped: no Redis and no DB session provided.")
 
@@ -342,9 +307,10 @@ async def broadcast_live_update(
     message: Optional[str] = None,
     db: Optional[AsyncSession] = None
 ) -> None:
-    """
-    Push a real-time event to a user via Pub/Sub.
-    Used for UI synchronization (e.g. "Someone is editing this ticket").
+    """Transmits immediate transient signals tracking active user interfaces states.
+
+    Employed to synchronize transient frontend properties, such as typing cursors
+    or active edit fields, maintaining live UI consistency across sessions.
     """
     from app.schemas.websocket import WSMessage
     
@@ -354,7 +320,6 @@ async def broadcast_live_update(
         message=message
     )
     
-    # We must use Pub/Sub here too, so that it works across multiple workers!
     event = ws_msg.model_dump(mode="json")
     event["user_id"] = str(user_id)
     
@@ -374,10 +339,7 @@ async def notify_ticket_updated(
     ticket: Ticket,
     actor: User,
 ) -> None:
-    """
-    Broadcast a global real-time update event.
-    This ensures all connected users see the change in their UI (Kanban/List).
-    """
+    """Drives universal visual synchronization refreshes tracking metadata changes."""
     await broadcast_global_event(
         type=WSMessageType.TICKET_UPDATED,
         data={
@@ -396,9 +358,7 @@ async def list_notifications(
     user_id: uuid.UUID, 
     limit: int = 50
 ) -> list[NotificationOut]:
-    """
-    Retrieves the most recent notifications for a specific user.
-    """
+    """Queries chronologically ordered historical alert arrays bound to target users."""
     result = await db.execute(
         select(Notification)
         .where(Notification.user_id == user_id)
@@ -414,8 +374,9 @@ async def mark_read(
     notification_id: uuid.UUID,
     user_id: uuid.UUID
 ) -> bool:
-    """
-    Marks a single notification as read if it belongs to the user.
+    """Updates targeted alert state markers to 'read' releasing unread quotas.
+
+    Transmits synchronized dismissal event notices via user messaging routes.
     """
     from sqlalchemy import update
     result = await db.execute(
@@ -433,7 +394,7 @@ async def mark_read(
         data={"id": str(notification_id), "unread_count": unread_count},
     )
     await _publish_user_event(db, user_id, ws_msg)
-    await db.commit()  # flush PG NOTIFY when Redis is unavailable
+    await db.commit()
     return True
 
 
@@ -442,9 +403,7 @@ async def delete_notification(
     notification_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> bool:
-    """
-    Delete a single notification if it belongs to the user.
-    """
+    """Deletes single historical notifications bound to verifying user contexts."""
     result = await db.execute(
         select(Notification).where(
             Notification.id == notification_id,
@@ -467,14 +426,12 @@ async def delete_notification(
         },
     )
     await _publish_user_event(db, user_id, ws_msg)
-    await db.commit()  # flush PG NOTIFY when Redis is unavailable
+    await db.commit()
     return True
 
 
 async def mark_all_read(db: AsyncSession, user_id: uuid.UUID) -> int:
-    """
-    Marks all unread notifications for a user as read.
-    """
+    """Aggregates and executes bulk read updates modifying unread flag statuses."""
     from sqlalchemy import update
     result = await db.execute(
         update(Notification)
@@ -490,19 +447,17 @@ async def broadcast_notifications_read_all(
     user_id: uuid.UUID,
     unread_count: int = 0,
 ) -> None:
-    """Notify all active tabs for a user that every notification is now read."""
+    """Forces global dismissal operations across parallel client session tabs."""
     ws_msg = WSMessage(
         type=WSMessageType.NOTIFICATIONS_READ_ALL,
         data={"unread_count": unread_count},
     )
     await _publish_user_event(db, user_id, ws_msg)
-    await db.commit()  # flush PG NOTIFY when Redis is unavailable
+    await db.commit()
 
 
 async def get_unread_count(db: AsyncSession, user_id: uuid.UUID) -> int:
-    """
-    Returns the number of unread notifications for a user.
-    """
+    """Executes optimized SQL count aggregates scanning for active alert statuses."""
     result = await db.execute(
         select(func.count(Notification.id))
         .where(Notification.user_id == user_id, Notification.read == False)
@@ -515,9 +470,7 @@ async def list_unread_notifications(
     user_id: uuid.UUID, 
     limit: int = 50
 ) -> list[NotificationOut]:
-    """
-    Retrieves only the unread notifications for a specific user.
-    """
+    """Retrieves prioritized historical enumerations filtering for active unread states."""
     result = await db.execute(
         select(Notification)
         .where(Notification.user_id == user_id, Notification.read == False)

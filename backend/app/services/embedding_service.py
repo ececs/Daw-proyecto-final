@@ -1,22 +1,9 @@
-"""
-Embedding Service Module.
+"""Google Gemini vector embedding integration provider.
 
-This service manages the generation of high-dimensional vector representations
-for text data using Google's Gemini Embedding API. It is a core component of the
-D4-Ticket AI semantic search engine, enabling Retrieval-Augmented Generation (RAG)
-and similarity-based ticket grouping.
-
-Key Features:
-- Model: gemini-embedding-2 (2026 Standard).
-- Dimensionality: Optimized to 768 via Matryoshka Representation Learning.
-- Scalability: Asynchronous HTTP requests with automatic truncation.
-- Reliability: Graceful degradation to keyword search on API failures.
-
-Workflow:
-1. Receives raw text (Ticket, Knowledge, or Query).
-2. Truncates content to comply with context window limits.
-3. Calls Google API with appropriate taskType (DOCUMENT vs QUERY).
-4. Returns a normalized vector for persistent storage or real-time comparison.
+Manages asynchronous HTTP calls to the Google Generative AI API executing high-dimensional
+vector transformations. Configured to yield optimized 768-dimensional arrays using the
+Matryoshka Representation Learning standard (gemini-embedding-2) to optimize PostgreSQL
+index performance and memory layouts.
 """
 
 import asyncio
@@ -27,9 +14,6 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# In 2026, gemini-embedding-2 is the GA (General Availability) standard.
-# It is multimodal and supports Matryoshka truncation for optimized dimensions.
-# Standardized to 768 to optimize semantic search performance.
 EMBEDDING_MODEL = "gemini-embedding-2"
 EMBEDDING_DIM = 768
 _EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
@@ -39,21 +23,16 @@ async def generate_embedding(
     text: str,
     task_type: str = "RETRIEVAL_DOCUMENT",
 ) -> Optional[list[float]]:
-    """
-    Generates a high-dimensional vector embedding for the provided text.
+    """Generates a 768-dimensional semantic vector array for arbitrary text.
 
-    Communicates with the Google Generative AI API using the gemini-embedding-2 
-    model. The output dimensionality is strictly controlled at 768 to ensure 
-    PostgreSQL HNSW index efficiency and consistent RAM usage.
+    Conforms to context size parameters, truncating source inputs to avoid API faults.
 
     Args:
-        text: The source text to transform into a vector.
-        task_type: The intended use of the embedding. 
-            Options: "RETRIEVAL_DOCUMENT" (default) or "RETRIEVAL_QUERY".
+        text: Source raw textual content to undergo transformation.
+        task_type: Retrieval intent identifier. Valid: 'RETRIEVAL_DOCUMENT' or 'RETRIEVAL_QUERY'.
 
     Returns:
-        Optional[list[float]]: A list of 768 floating-point values representing 
-             the semantic content of the text, or None if the process fails.
+        Optional[list[float]]: Optimized floating-point array if successful, otherwise None.
     """
     from app.core.config import settings
 
@@ -84,18 +63,16 @@ async def generate_embedding(
 
 
 async def generate_ticket_embedding(title: str, description: Optional[str] = None) -> Optional[list[float]]:
-    """
-    Specialized wrapper to generate embeddings for Ticket entities.
+    """Constructs an specialized semantic vector representing a Ticket record.
 
-    Combines the title and description fields into a single semantic context 
-    string before performing the embedding generation.
+    Combines summary titles and structural descriptions into a unified input context.
 
     Args:
-        title: The summary or primary title of the ticket.
-        description: The extended details of the ticket. Defaults to None.
+        title: The foundational subject/title line of the ticket.
+        description: Detailed incident notes describing the issue.
 
     Returns:
-        Optional[list[float]]: The 768-dimension vector for the combined ticket text.
+        Optional[list[float]]: Combined semantic embedding vector array.
     """
     text = title
     if description:

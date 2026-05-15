@@ -1,5 +1,4 @@
-"""
-JWT token utilities.
+"""Stateless JWT token utilities.
 
 We use JSON Web Tokens (JWT) for stateless authentication.
 After a successful Google OAuth login, we issue a JWT that the client stores
@@ -18,14 +17,13 @@ from .config import settings
 
 
 def create_access_token(subject: str) -> str:
-    """
-    Create a signed JWT for the given subject (user ID).
+    """Creates a signed JWT for the specified subject (user ID).
 
     Args:
         subject: The user's UUID as a string. Used as the 'sub' claim.
 
     Returns:
-        A signed JWT string valid for ACCESS_TOKEN_EXPIRE_MINUTES.
+        str: A signed JWT string valid for ACCESS_TOKEN_EXPIRE_MINUTES.
     """
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
@@ -36,15 +34,14 @@ def create_access_token(subject: str) -> str:
 
 
 def decode_access_token(token: str) -> str | None:
-    """
-    Decode and verify a JWT, returning the subject (user ID) if valid.
+    """Decodes and verifies a JWT, retrieving the subject identity.
 
     Args:
         token: The JWT string to verify.
 
     Returns:
-        The 'sub' claim (user ID string) if the token is valid and not expired.
-        None if the token is invalid, expired, or tampered with.
+        str | None: The 'sub' claim (user ID string) if the token is valid and not expired,
+            or None if the token is invalid, expired, or tampered with.
     """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])

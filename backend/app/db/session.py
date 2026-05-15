@@ -1,3 +1,10 @@
+"""Asynchronous database session management.
+
+Configures the core SQLAlchemy async engine with customized connection pooling
+strategies and exports session factories for dependency injection and manual session
+contexts.
+"""
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from app.core.config import settings
 
@@ -18,5 +25,13 @@ async_session_factory = AsyncSessionLocal
 
 
 async def get_db() -> AsyncSession:
+    """Generates an asynchronous database session context.
+
+    Intended to be utilized as a FastAPI dependency. Yields an open session to
+    the calling handler and automatically closes it when the context exits.
+
+    Yields:
+        AsyncSession: An active asynchronous database connection session.
+    """
     async with AsyncSessionLocal() as session:
         yield session

@@ -1,3 +1,9 @@
+"""Artificial Intelligence telemetry operational schemas.
+
+Defines payload structures for user-submitted reinforcement learning feedback
+and system-aggregated financial/accuracy summaries.
+"""
+
 import uuid
 from datetime import datetime
 
@@ -5,6 +11,10 @@ from pydantic import BaseModel, Field
 
 
 class AIFeedbackCreate(BaseModel):
+    """Input schema for submitting user evaluation on a discrete AI execution.
+
+    Supports storing discrete tags (labels) and rich-text user summaries.
+    """
     ai_run_id: uuid.UUID
     helped: bool
     label: str | None = Field(default=None, max_length=64)
@@ -12,6 +22,11 @@ class AIFeedbackCreate(BaseModel):
 
 
 class AIRunStatsSummary(BaseModel):
+    """Analytical summary mapping global system performance and token consumption.
+
+    Aggregates hit rates, average cost distributions, and system-wide conversion
+    metrics reflecting business outcomes across historical executions.
+    """
     total_runs: int
     runs_by_surface: dict[str, int]
     success_rate: float
@@ -31,6 +46,11 @@ class AIRunStatsSummary(BaseModel):
 
 
 class AITicketStats(BaseModel):
+    """Discrete telemetry footprint mapping AI assistance on a specific ticket.
+
+    Accumulates operational costs, diagnosis iterations, and reinforcement logs
+    scoped strictly to single incident identifiers.
+    """
     ticket_id: uuid.UUID
     diagnosis_runs: int
     chat_runs: int

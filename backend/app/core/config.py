@@ -1,5 +1,4 @@
-"""
-Application configuration.
+"""Application configuration.
 
 Uses pydantic-settings to load configuration from environment variables (or a .env file).
 All settings are typed and validated at startup — if a required value is missing or
@@ -14,8 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """
-    Central settings object loaded from environment variables.
+    """Central settings object loaded from environment variables.
 
     All fields have sensible defaults for local development with Docker Compose.
     In production (Railway/Vercel), override via the hosting platform's env vars.
@@ -34,6 +32,22 @@ class Settings(BaseSettings):
     @field_validator("SECRET_KEY")
     @classmethod
     def _require_strong_secret(cls, v: str) -> str:
+        """Enforces cryptographic strength requirements for the JWT secret key.
+
+        Ensures the default key is overridden when executing in a production context
+        (e.g., deployment via Railway). This safeguard prevents accidental deployments
+        using unsecured placeholder credentials.
+
+        Args:
+            v: The configured secret key string value.
+
+        Returns:
+            str: The validated secret key.
+
+        Raises:
+            ValueError: If the default placeholder secret is detected in a production
+                environment.
+        """
         import os
         in_production = bool(
             os.getenv("RAILWAY_ENVIRONMENT_NAME") or
@@ -64,6 +78,17 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: Any) -> list[str]:
+        """Parses and sanitizes comma-separated CORS origin strings.
+
+        Allows feeding a single string of comma-separated values from environment variables
+        directly into the list-based CORS validation layer.
+
+        Args:
+            v: Either a list of domains or a raw comma-separated string.
+
+        Returns:
+            list[str]: A list of stripped, valid origin domains.
+        """
         if isinstance(v, str):
             return [i.strip() for i in v.split(",") if i.strip()]
         return v
@@ -78,6 +103,18 @@ class Settings(BaseSettings):
     @field_validator("ALLOWED_EMAILS", mode="before")
     @classmethod
     def parse_allowed_emails(cls, v: Any) -> list[str]:
+        """Resolves incoming email authorization rules into a structured list.
+
+        Handles raw strings containing JSON arrays or comma-separated emails/domains,
+        facilitating integration with cloud environment variables. Defaults to wildcards
+        if empty configurations are passed.
+
+        Args:
+            v: Raw email authorization payload from system settings.
+
+        Returns:
+            list[str]: Evaluated list of authorized emails or wildcard rules.
+        """
         if isinstance(v, str):
             v = v.strip()
             if not v:

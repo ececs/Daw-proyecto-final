@@ -1,16 +1,8 @@
-"""
-Authentication routes — Google OAuth 2.0 flow (stateless, no server-side sessions).
+"""Authentication API Module.
 
-OAuth 2.0 Authorization Code Flow:
-  1. GET /auth/google  →  generates a signed state cookie + redirects to Google.
-  2. User grants permission → Google redirects to GET /auth/callback?code=...&state=...
-  3. Backend verifies state cookie, exchanges code for tokens via Google's token endpoint.
-  4. Backend fetches user profile, upserts the user in our DB.
-  5. Backend issues our JWT as an HttpOnly cookie and redirects to the frontend.
-
-State management: instead of server-side sessions (which require SessionMiddleware and
-sticky sessions), we store the OAuth state in a short-lived signed HttpOnly cookie.
-The state is validated in the callback before the code exchange.
+Implements Google OAuth 2.0 stateless flow utilizing signed short-lived HttpOnly cookies, 
+enterprise domain whitelisting filters, and secure session tear-down. Supports a 
+throttled academic 'demo-login' endpoint restricted via dynamic Redis-backed IP limits.
 """
 
 import logging
@@ -37,6 +29,7 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 class DemoLoginRequest(BaseModel):
+    """Validates internal evaluation-only bypass payload schemas."""
     code: str = Field(..., description="The secret demo access code")
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -48,11 +41,13 @@ _is_https = settings.BACKEND_URL.startswith("https")
 
 @router.get("/google", summary="Initiate Google OAuth login")
 async def login_google():
-    """
-    Redirect the user to Google's OAuth consent screen.
+    """Starts three-legged OAuth2 authorization code grant workflows.
 
-    Generates a random state token, sets it as a short-lived HttpOnly cookie
-    (no server-side session required), and redirects to Google.
+    Creates random unguessable tokens saved into cryptographic cookies countering
+    potential Cross-Site Request Forgery (CSRF) vectors.
+
+    Returns:
+        RedirectResponse: Directs browsers toward Google's identity confirmation screen.
     """
     state = secrets.token_urlsafe(32)
     redirect_uri = f"{settings.BACKEND_URL}/api/v1/auth/callback"
@@ -73,7 +68,7 @@ async def login_google():
         httponly=True,
         secure=_is_https,
         samesite="lax",
-        max_age=300,  # 5 minutes — more than enough to complete the OAuth flow
+        max_age=300,
     )
     return redirect
 
@@ -86,12 +81,15 @@ async def auth_callback(
     state: str,
     oauth_state: str | None = Cookie(default=None),
 ):
-    """
-    Handle the OAuth callback from Google.
+    """Terminates authorization codes exchanged for Bearer tokens.
 
-    Verifies the state cookie, exchanges the authorization code for tokens,
-    fetches the user profile, upserts the user, and issues our JWT as an
-    HttpOnly cookie before redirecting to the frontend dashboard.
+    Inspects incoming state strings against generated cookies, parses claim
+    information from Google servers, registers persistent User records, and issues 
+    a secured JWT redirecting identities toward the core application.
+
+    Raises:
+        HTTPException (400): Handled upon state mismatches or token endpoint failures.
+        HTTPException (403): Triggered when identities conflict with configured domain bounds.
     """
     if not oauth_state or state != oauth_state:
         raise HTTPException(status_code=400, detail="Invalid OAuth state — possible CSRF attack")
@@ -123,7 +121,6 @@ async def auth_callback(
     if not email:
         raise HTTPException(status_code=400, detail="Could not retrieve email from Google")
 
-    # --- Whitelist Check ---
     allowed = False
     if settings.ALLOWED_EMAILS == ["*"]:
         allowed = True
@@ -161,9 +158,6 @@ async def auth_callback(
 
     jwt_token = create_access_token(str(user.id))
 
-    # Redirect to the frontend's /api/auth/callback route which sets the cookie
-    # on the frontend domain (necessary because backend and frontend are on different
-    # domains — cookies set by the backend cannot be read by the frontend browser).
     redirect = RedirectResponse(
         url=f"{settings.FRONTEND_URL}/api/auth/callback?token={jwt_token}"
     )
@@ -173,7 +167,7 @@ async def auth_callback(
 
 @router.post("/logout", summary="Invalidate session")
 async def logout(response: Response):
-    """Clear the JWT cookie, logging the user out."""
+    """Instructs user browsers to prune the authentication JWT cookie payload."""
     response.delete_cookie(
         key="access_token",
         path="/",
@@ -186,13 +180,15 @@ async def logout(response: Response):
 
 @router.post("/demo-login", summary="Login with a secret demo code")
 async def demo_login(request: Request, body: DemoLoginRequest, db: DB):
+    """Authorizes temporary evaluation logins bypassing OAuth constraints.
+
+    Restricted via dynamic token-bucket throttling (max 5 tries / 15 mins) protecting
+    endpoints against sequential brute-force, exempting local loopback traffic patterns.
+
+    Raises:
+        HTTPException (429): Triggered when dynamic rates violate security constraints.
+        HTTPException (401): Supplied when incorrect passcodes are received.
     """
-    Allow access via a pre-configured secret code.
-    Useful for evaluators who don't want to use Google OAuth.
-    """
-    # --- Rate Limiting ---
-    # Max 5 attempts per 15 minutes per IP to prevent brute-force.
-    # Local loopback and common Docker bridge gateways are exempt so Playwright/dev flows stay smooth.
     ip = request.client.host if request.client else "unknown"
     docker_local_gateways = {"172.17.0.1", "172.18.0.1", "172.19.0.1", "host.docker.internal"}
     is_local = ip == "localhost" or ip in docker_local_gateways
@@ -214,7 +210,6 @@ async def demo_login(request: Request, body: DemoLoginRequest, db: DB):
             detail="Código de acceso incorrecto o no configurado."
         )
 
-    # Use a fixed email for the demo user
     demo_email = "usuario.demo@demo.local"
     result = await db.execute(select(User).where(User.email == demo_email))
     user = result.scalar_one_or_none()
@@ -235,5 +230,5 @@ async def demo_login(request: Request, body: DemoLoginRequest, db: DB):
 
 @router.get("/me", response_model=UserOut, summary="Get current user profile")
 async def get_me(current_user: CurrentUser):
-    """Return the authenticated user's profile."""
+    """Validates active JWT scopes resolving the current operator profile."""
     return current_user

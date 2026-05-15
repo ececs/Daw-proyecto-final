@@ -1,5 +1,7 @@
-"""
-Comment routes — Nested under /api/v1/tickets/{ticket_ref}/comments.
+"""Ticket commentary discussion thread controller.
+
+Exposes nested API routing patterns nested under parent ticket nodes managing 
+chronological discussion enumerations, discrete comment postings, and selective removals.
 """
 
 import uuid
@@ -14,11 +16,9 @@ router = APIRouter(prefix="/tickets", tags=["Comments"])
 
 
 async def _resolve_ticket_or_raise(db: DB, ticket_ref: str):
-    """
-    Resolve the parent ticket before comment operations.
+    """Resolves the encompassing parent ticket before executing commentary actions.
 
-    Comment routes should mirror ticket routes and reject malformed references
-    with a validation error instead of a generic 404.
+    Safeguards routes against malformed input tokens emitting early validation flags.
     """
     if not ticket_service.is_valid_ticket_ref(ticket_ref):
         raise HTTPException(
@@ -38,6 +38,7 @@ async def _resolve_ticket_or_raise(db: DB, ticket_ref: str):
     summary="List comments on a ticket",
 )
 async def list_comments(ticket_ref: str, db: DB, current_user: CurrentUser):
+    """Queries the chronologically assembled commentary thread of a resolved ticket."""
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     return await comment_service.list_comments(db, ticket.id)
 
@@ -54,6 +55,7 @@ async def create_comment(
     db: DB,
     current_user: CurrentUser,
 ):
+    """Registers fresh structured commentary content into existing incident logs."""
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     comment = await comment_service.create_comment(
         db, ticket_id=ticket.id, content=body.content, author=current_user
@@ -74,6 +76,12 @@ async def delete_comment(
     db: DB,
     current_user: CurrentUser,
 ):
+    """Removes active commentary nodes scoped to verifying creators.
+
+    Raises:
+        HTTPException (404): Issued when targeted comments do not exist.
+        HTTPException (403): Enforces author-exclusive comment removal barriers.
+    """
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     success = await comment_service.delete_comment(

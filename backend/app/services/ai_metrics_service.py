@@ -1,3 +1,10 @@
+"""AI analytics, telemetry, and performance measurement service.
+
+Tracks operational performance vectors quantifying execution costs, user feedback counts,
+semantic search efficiency, and multi-agent model failovers. Aggregates high-level
+business metrics contrasting resolution timescales with and without active AI agents.
+"""
+
 from __future__ import annotations
 
 import math
@@ -16,7 +23,6 @@ from app.models.ai_run import AIRun
 from app.models.ticket import Ticket
 from app.models.ticket_history import TicketHistory
 
-
 MODEL_PRICING_PER_MILLION = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
@@ -25,6 +31,7 @@ MODEL_PRICING_PER_MILLION = {
 
 
 def ensure_utc(dt: datetime | None) -> datetime | None:
+    """Forces timestamp zone objects into explicit UTC alignment formats."""
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -33,12 +40,14 @@ def ensure_utc(dt: datetime | None) -> datetime | None:
 
 
 def estimate_tokens(text: str | None) -> int:
+    """Applies heuristics to determine token usage estimates based on input lengths."""
     if not text:
         return 0
     return max(1, math.ceil(len(text) / 4))
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Calculates estimated dollars charged matching current pricing metrics."""
     pricing = MODEL_PRICING_PER_MILLION.get(model)
     if not pricing:
         return 0.0
@@ -48,10 +57,12 @@ def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> floa
 
 
 def configured_primary_signature() -> tuple[str, str]:
+    """Recover active provider configuration signatures."""
     return settings.AI_PROVIDER, settings.AI_MODEL
 
 
 def detect_provider_and_model(event_name: str | None) -> tuple[str, str]:
+    """Scans incoming event names parsing corresponding model classification strings."""
     name = event_name or ""
     lowered = name.lower()
     if "openai" in lowered:
@@ -62,6 +73,7 @@ def detect_provider_and_model(event_name: str | None) -> tuple[str, str]:
 
 
 def normalize_rag_source(sources: set[str]) -> str:
+    """Collapses disparate set sources into unified string namespace definitions."""
     cleaned = {src for src in sources if src and src != "none"}
     if not cleaned:
         return "none"
@@ -72,6 +84,11 @@ def normalize_rag_source(sources: set[str]) -> str:
 
 @dataclass
 class AIRunTracker:
+    """Telemetry tracking context monitoring individual AI run operational lifecycles.
+
+    Accumulates live execution states, RAG performance, failover indicators,
+    latency records, and token completion payloads.
+    """
     surface: str
     user_id: uuid.UUID
     ticket_id: uuid.UUID | None = None
@@ -92,6 +109,7 @@ class AIRunTracker:
     error_message: str | None = None
 
     def register_model(self, event_name: str | None) -> None:
+        """Analyzes observed model event names flagging fallback activations."""
         observed_provider, observed_model = detect_provider_and_model(event_name)
         self.provider = observed_provider
         self.model = observed_model
@@ -99,24 +117,29 @@ class AIRunTracker:
             self.used_fallback = True
 
     def add_tool_action(self) -> None:
+        """Increments local trackers logging successful agent tool triggerings."""
         self.tool_actions_count += 1
 
     def record_rag(self, queries: int, hits: int, source: str) -> None:
+        """Records query totals and hit metrics received during context assemblies."""
         self.rag_queries_count += max(0, queries)
         self.rag_hits_count += max(0, hits)
         if source:
             self.rag_sources.add(source)
 
     def append_output(self, text: str) -> None:
+        """Parses text spans estimating sequential output token growths."""
         if text:
             self.output_tokens += estimate_tokens(text)
 
     @property
     def latency_ms(self) -> int:
+        """Calculates absolute execution elapsed millisecond intervals."""
         return int((datetime.now(timezone.utc) - self.started_at).total_seconds() * 1000)
 
     @property
     def rag_source(self) -> str:
+        """Normalizes cumulative dynamic chunk collections."""
         return normalize_rag_source(self.rag_sources)
 
 
@@ -131,6 +154,7 @@ async def create_ai_run(
     model: str | None = None,
     estimated_input_tokens: int | None = None,
 ) -> AIRun:
+    """Initializes an operational AIRun metrics baseline log entry."""
     ai_run = AIRun(
         user_id=user_id,
         surface=surface,
@@ -155,6 +179,7 @@ async def finalize_ai_run(
     success: bool,
     error_message: str | None = None,
 ) -> AIRun:
+    """Concludes execution tracks, persists costs, and fires system-wide OpenTelemetry signals."""
     ai_run.provider = tracker.provider
     ai_run.model = tracker.model
     ai_run.used_fallback = tracker.used_fallback
@@ -198,6 +223,7 @@ async def create_feedback(
     label: str | None = None,
     notes: str | None = None,
 ) -> AIFeedback:
+    """Registers qualitative user satisfaction records bound to AI execution instances."""
     existing = await db.execute(
         select(AIFeedback).where(
             AIFeedback.ai_run_id == ai_run_id,
@@ -224,6 +250,7 @@ async def create_feedback(
 
 
 async def _first_close_map(db: AsyncSession) -> dict[uuid.UUID, datetime]:
+    """Compiles explicit datetime mappings tracking first 'closed' transitions."""
     result = await db.execute(
         select(TicketHistory.ticket_id, func.min(TicketHistory.created_at))
         .where(
@@ -243,11 +270,7 @@ async def _first_close_map(db: AsyncSession) -> dict[uuid.UUID, datetime]:
 async def get_session_stats(
     db: AsyncSession, user_id: uuid.UUID, since: datetime
 ) -> dict:
-    """Per-user counters since a timestamp, computed from ai_runs.
-
-    Used by /ai/status to scope the session-usage panel to the current user's
-    browser session, instead of the process-global in-memory observability state.
-    """
+    """Compiles user-scoped dashboard summaries scanning local user execution sessions."""
     runs = (
         await db.execute(
             select(AIRun)
@@ -292,6 +315,10 @@ async def get_session_stats(
 
 
 async def get_stats_summary(db: AsyncSession) -> dict:
+    """Builds comprehensive global analytics aggregating system-wide ROI benchmarks.
+
+    Compares resolution velocities of AI-aided incidents against purely human-solved flows.
+    """
     runs = (await db.execute(select(AIRun))).scalars().all()
     feedback_rows = (await db.execute(select(AIFeedback))).scalars().all()
     tickets = (await db.execute(select(Ticket))).scalars().all()
@@ -363,6 +390,7 @@ async def get_stats_summary(db: AsyncSession) -> dict:
 
 
 async def get_ticket_stats(db: AsyncSession, ticket_id: uuid.UUID) -> dict:
+    """Gathers granular analytical feedback metrics scoped to a single incident record."""
     ticket = await db.get(Ticket, ticket_id)
     if not ticket:
         raise ValueError("Ticket not found")

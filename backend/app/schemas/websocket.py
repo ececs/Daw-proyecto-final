@@ -1,9 +1,16 @@
+"""WebSocket real-time communications infrastructure schemas.
+
+Contains internal enumerations for event-driven multiplexing across active
+connection states and client distribution envelopes.
+"""
+
 from enum import Enum
 from typing import Any, Dict, Optional
 from pydantic import BaseModel, ConfigDict, Field
 import uuid
 
 class WSMessageType(str, Enum):
+    """Allowed categorization types for real-time streaming payloads."""
     NOTIFICATION = "notification"
     NOTIFICATION_DELETED = "notification_deleted"
     NOTIFICATION_READ = "notification_read"
@@ -15,8 +22,10 @@ class WSMessageType(str, Enum):
     SYSTEM_ALERT = "system_alert"
 
 class WSMessage(BaseModel):
-    """
-    Standard envelope for all WebSocket messages.
+    """Unified messaging envelope distributing real-time payloads to browsers.
+
+    Standardizes standard message frames, supporting contextual ticket references
+    and nested payload dictionaries for rich client-side state updates.
     """
     type: WSMessageType
     ticket_id: Optional[uuid.UUID] = None

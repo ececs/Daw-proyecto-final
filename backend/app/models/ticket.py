@@ -1,5 +1,4 @@
-"""
-Ticket model — the core entity of the system.
+"""Ticket database model and enumeration schemas.
 
 A ticket represents an incident, task, or issue. It tracks:
   - Who created it (author) and who is responsible for it (assignee)
@@ -37,7 +36,7 @@ except ImportError:
 
 
 class TicketStatus(str, enum.Enum):
-    """Workflow states a ticket can be in. Order reflects typical progression."""
+    """Workflow state boundaries defining the progression lifecycle of a ticket."""
     open = "open"
     in_progress = "in_progress"
     in_review = "in_review"
@@ -45,7 +44,7 @@ class TicketStatus(str, enum.Enum):
 
 
 class TicketPriority(str, enum.Enum):
-    """Urgency levels, from lowest to highest."""
+    """Urgency tiers utilized to rank execution priority and visualization markers."""
     low = "low"
     medium = "medium"
     high = "high"
@@ -53,19 +52,21 @@ class TicketPriority(str, enum.Enum):
 
 
 class Ticket(Base):
-    """
-    Represents a work item in the ticketing system.
+    """Represents a distinct work item or incident within the ticketing ecosystem.
 
-    Columns:
-      id          - UUID primary key (generated server-side for security)
-      title       - Short summary displayed in list and kanban views
-      description - Full details, supports multi-line text
-      status      - Current workflow state (drives kanban column placement)
-      priority    - Urgency level (drives sorting and visual indicators)
-      author_id   - User who created the ticket (immutable after creation)
-      assignee_id - User currently responsible (nullable — unassigned tickets are valid)
-      created_at  - Immutable creation timestamp
-      updated_at  - Auto-updated on every PATCH via SQLAlchemy onupdate
+    Captures workflow lifecycle status, priority ranking, ownership, and includes
+    asynchronous vector embedding properties for semantic similarity searching.
+
+    Attributes:
+        id: UUID primary key (generated server-side for security).
+        title: Short summary displayed in list and kanban views.
+        description: Full details, supports multi-line text.
+        status: Current workflow state (drives kanban column placement).
+        priority: Urgency level (drives sorting and visual indicators).
+        author_id: User who created the ticket (immutable after creation).
+        assignee_id: User currently responsible (nullable).
+        created_at: Immutable creation timestamp.
+        updated_at: Auto-updated on every PATCH via SQLAlchemy onupdate.
     """
 
     __tablename__ = "tickets"

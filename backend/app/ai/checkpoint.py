@@ -1,5 +1,4 @@
-"""
-LangGraph PostgreSQL checkpointer — persistent conversation memory.
+"""LangGraph PostgreSQL checkpointer for persistent conversation memory.
 
 Why a module-level singleton?
   AsyncPostgresSaver maintains a psycopg connection pool. Creating it per
@@ -24,10 +23,11 @@ _pool = None
 
 
 async def init_checkpointer() -> None:
-    """
-    Initialize AsyncPostgresSaver and create checkpoint tables if needed.
-    Called once at application startup from the lifespan context.
-    Fails gracefully — the agent works without it (stateless fallback).
+    """Initializes the PostgreSQL conversational state checkpointer asynchronously.
+
+    Configures a dedicated AsyncConnectionPool using psycopg and instantiates the
+    AsyncPostgresSaver checkpointer instance. Executes necessary table initialization.
+    Fails gracefully falling back to stateless mode if connectivity issues arise.
     """
     global _checkpointer, _pool
 
@@ -71,12 +71,21 @@ async def init_checkpointer() -> None:
 
 
 def get_checkpointer():
-    """Return the active checkpointer, or None if unavailable."""
+    """Retrieves the active persistent conversational checkpointer instance.
+
+    Returns:
+        Optional[AsyncPostgresSaver]: The global checkpointer singleton, or None if the
+            system is running in stateless fallback mode.
+    """
     return _checkpointer
 
 
 async def close_pool() -> None:
-    """Close the psycopg connection pool on application shutdown."""
+    """Closes the dedicated PostgreSQL connection pool gracefully on shutdown.
+
+    Ensures database connection resources are properly returned to the database engine
+    during clean application teardown cycles.
+    """
     global _pool
     if _pool is not None:
         await _pool.close()

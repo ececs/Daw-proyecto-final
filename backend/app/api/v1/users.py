@@ -1,5 +1,7 @@
-"""
-User routes.
+"""User directory API endpoints.
+
+Provides validated client access to enterprise personnel listings and role structures.
+Requires valid active JWT sessions for all retrieval operations.
 """
 
 from typing import List
@@ -13,7 +15,11 @@ router = APIRouter(prefix="/users", tags=["Users"])
 
 @router.get("", response_model=List[UserOut], summary="List all users")
 async def list_users(current_user: CurrentUser, db: DB):
-    """
-    Return all registered users.
+    """Fetches alphabetical listings of all registered system operators.
+
+    Access requires a verified Bearer token issued during authentication cycles.
+
+    Returns:
+        List[UserOut]: Comprehensive enumeration of active user metadata structures.
     """
     return await user_service.list_users(db)

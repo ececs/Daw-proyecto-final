@@ -1,3 +1,9 @@
+"""AI Agent Run telemetry database model mapping.
+
+Tracks and archives executing instances of the AI Assistant loop, recording latency,
+resource usage (tokens), tool invocation frequency, and financial costs.
+"""
+
 import uuid
 from datetime import datetime, timezone
 
@@ -8,6 +14,13 @@ from app.db.base import Base
 
 
 class AIRun(Base):
+    """Represents a single discrete execution thread of the AI Assistant agent.
+
+    Maintains high-fidelity operational telemetry, capturing performance overhead,
+    token-level costing estimates, and structured RAG analytics for observability
+    dashboarding and auditing.
+    """
+
     __tablename__ = "ai_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

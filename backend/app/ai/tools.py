@@ -1,5 +1,4 @@
-"""
-LangGraph Tool Factory Module with Pydantic Validation.
+"""LangGraph Tool Factory Module with Pydantic Validation.
 
 This module defines the suite of tools available to the AI agent. It uses
 Pydantic schemas for argument validation, ensuring that the LLM provides
@@ -47,19 +46,23 @@ def _normalize(s: str) -> str:
 # --- Pydantic Schemas for Tool Arguments ---
 
 class QueryTicketsSchema(BaseModel):
+    """Validation schema for querying and filtering system tickets."""
     status: Optional[str] = Field(None, description="Filter by: open, in_progress, in_review, closed")
     priority: Optional[str] = Field(None, description="Filter by: low, medium, high, critical")
     search: Optional[str] = Field(None, description="Text to search in the ticket title")
     limit: int = Field(10, ge=1, le=50, description="Max results to return")
 
 class GetTicketSchema(BaseModel):
+    """Validation schema for retrieving discrete ticket details."""
     ticket_id: str = Field(..., description="The UUID string of the ticket")
 
 class GetTicketHistorySchema(BaseModel):
+    """Validation schema for fetching ticket historical audit trails."""
     ticket_id: str = Field(..., description="UUID of the ticket")
     limit: int = Field(15, ge=1, le=50, description="Max history entries to return")
 
 class CreateTicketSchema(BaseModel):
+    """Validation schema for creating new ticketing incidents."""
     title: str = Field(..., description="Concise title of the issue")
     description: Optional[str] = Field(None, description="Detailed context")
     priority: str = Field("medium", description="low, medium, high, or critical")
@@ -68,6 +71,7 @@ class CreateTicketSchema(BaseModel):
     client_summary: Optional[str] = Field(None, description="Brief summary of who the client is and what they do")
 
 class ReassignTicketSchema(BaseModel):
+    """Validation schema for performing user reassignment events."""
     ticket_id: str = Field(..., description="UUID of the ticket")
     assignee_email: str = Field(
         ...,
@@ -75,14 +79,17 @@ class ReassignTicketSchema(BaseModel):
     )
 
 class ChangeStatusSchema(BaseModel):
+    """Validation schema for performing state workflow transitions."""
     ticket_id: str = Field(..., description="UUID of the ticket")
     new_status: str = Field(..., description="New state: open, in_progress, in_review, closed")
 
 class AddCommentSchema(BaseModel):
+    """Validation schema for appending textual messages to ticket threads."""
     ticket_id: str = Field(..., description="UUID of the target ticket")
     content: str = Field(..., description="Text content of the comment")
 
 class UpdateTicketSchema(BaseModel):
+    """Validation schema for modifying multiple general ticket parameters."""
     ticket_id: str = Field(..., description="UUID of the ticket")
     title: Optional[str] = Field(None, description="New title")
     description: Optional[str] = Field(None, description="New description")
@@ -92,32 +99,54 @@ class UpdateTicketSchema(BaseModel):
     client_summary: Optional[str] = Field(None, description="New client profile summary")
 
 class SearchKnowledgeSchema(BaseModel):
+    """Validation schema for executing semantic vector-space RAG queries."""
     query: str = Field(..., description="The question or search phrase")
     k: int = Field(5, ge=1, le=10, description="Number of passages to retrieve")
 
 class AIDiagnoseSchema(BaseModel):
+    """Validation schema for initiating automated AI Co-pilot diagnoses."""
     ticket_id: str = Field(..., description="UUID of the ticket to diagnose")
 
 class FindUsersSchema(BaseModel):
+    """Validation schema for searching user records by textual name matching."""
     name: str = Field(
         ...,
         description="Partial or full name to search for (case-insensitive). Use this before reassigning when the user gives a name instead of an email."
     )
 
 class DeleteTicketSchema(BaseModel):
+    """Validation schema for triggering high-risk ticket deletion signals."""
     ticket_id: str = Field(..., description="UUID of the ticket to delete")
 
 # --- Tool Factory ---
 
 def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | None = None) -> List:
-    """
-    Returns a collection of validated tools for the AI agent.
+    """Constructs a collection of validated, scoped tools for the agent graph.
+
+    Embeds active transaction boundaries and security context (authenticated actor)
+    directly into the tool execution lifecycle. Employs locks to maintain
+    operational atomicity inside the shared graph session.
+
+    Args:
+        db: Active asynchronous SQLAlchemy transactional session.
+        actor: The authenticated User model executing the agent graph session.
+        metrics_tracker: Runtime telemetry tracker configured for the execution run.
+
+    Returns:
+        List: Collection of LangChain tools bound with defined argument schemas.
     """
     lock = asyncio.Lock()
 
     @tool(args_schema=QueryTicketsSchema)
     async def query_tickets(status=None, priority=None, search=None, limit=10) -> str:
-        """List tickets with optional filters. Results include status, priority, and title."""
+        """Executes a query to search and filter existing ticketing incidents.
+
+        Leverages hybrid search capabilities when searching by text, or falls back
+        to priority-sorted deterministic ordering.
+
+        Returns:
+            str: Formatted list string containing status, priority, and ticket keys.
+        """
         logger.info(f"AI Tool: query_tickets(status={status}, priority={priority}, search={search})")
         async with lock:
             try:
@@ -163,7 +192,11 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=GetTicketSchema)
     async def get_ticket(ticket_id: str) -> str:
-        """Get full details of a single ticket."""
+        """Retrieves detailed descriptive information for a single discrete ticket.
+
+        Returns:
+            str: Formatted summary outlining the title, status, and full description.
+        """
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -176,7 +209,11 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=GetTicketHistorySchema)
     async def get_ticket_history(ticket_id: str, limit: int = 15) -> str:
-        """Get the audit history of a ticket: who changed what and when."""
+        """Recovers the chronological audit trail for a specified ticket incident.
+
+        Returns:
+            str: A multi-line string documenting mutation events, actors, and datetimes.
+        """
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -201,7 +238,11 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=CreateTicketSchema)
     async def create_ticket(title, description=None, priority="medium", assignee_email=None, client_url=None, client_summary=None) -> str:
-        """Create a new support ticket with optional client context (URL/Summary)."""
+        """Creates a new ticketing incident record populated with client metadata context.
+
+        Returns:
+            str: Operation success message displaying the generated ticket UUID.
+        """
         async with lock:
             try:
                 prio = TicketPriority(priority)
@@ -228,7 +269,11 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=ChangeStatusSchema)
     async def change_status(ticket_id: str, new_status: str) -> str:
-        """Update a ticket's status."""
+        """Performs an atomic workflow state transition on an active ticket.
+
+        Returns:
+            str: Success string confirming completion of the transition.
+        """
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -241,7 +286,11 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=AddCommentSchema)
     async def add_comment(ticket_id: str, content: str) -> str:
-        """Add a comment to a ticket thread."""
+        """Appends a new threaded textual commentary entry onto an active ticket.
+
+        Returns:
+            str: Success indicator confirming comment persistence.
+        """
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -263,7 +312,13 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
         client_url=None, 
         client_summary=None
     ) -> str:
-        """Update any ticket field. Use 'assignee_email' to reassign, or set it to 'unassign' to clear it."""
+        """Modifies multiple arbitrary attribute fields associated with a ticket.
+
+        Triggers background indexing workflows automatically if client URL properties undergo updates.
+
+        Returns:
+            str: Update status confirmation message.
+        """
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -296,7 +351,11 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=SearchKnowledgeSchema)
     async def search_knowledge(query: str, k: int = 5) -> str:
-        """Query the knowledge base."""
+        """Queries the vectorized knowledge repository executing RAG lookups.
+
+        Returns:
+            str: A concatenated string of text passages yielding semantic proximity to query.
+        """
         async with lock:
             try:
                 result = await knowledge_service.search_with_stats(db, query, k=k)
@@ -312,8 +371,10 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=AIDiagnoseSchema)
     async def ai_diagnose_ticket(ticket_id: str) -> str:
-        """
-        AI Co-pilot: Generate a detailed diagnosis and suggested solution for a ticket.
+        """Invokes the AI Co-pilot engine to execute a multi-hop incident diagnosis.
+
+        Returns:
+            str: Comprehensive diagnostic textual reasoning containing remediation proposals.
         """
         async with lock:
             try:
@@ -331,12 +392,10 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=ReassignTicketSchema)
     async def reassign_ticket(ticket_id: str, assignee_email: str) -> str:
-        """
-        Reassign a ticket to another user by their email.
-        If the user gave you a name instead of an email, call find_users first.
-        When find_users returns exactly one match, ask the user to confirm the full name only.
-        Do not ask the user for the email again in that case: use the email returned by find_users.
-        Only ask for an email when there are multiple plausible matches or no match.
+        """Executes user ownership reassignment binding tickets to target emails.
+
+        Returns:
+            str: Final assignment confirmation summary indicating success.
         """
         async with lock:
             try:
@@ -355,10 +414,10 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=FindUsersSchema)
     async def find_users(name: str) -> str:
-        """
-        Search for users by name (case-insensitive partial match).
-        Use this before reassigning a ticket when the user provides a name instead of an email.
-        Returns name + email for each match so you can confirm by full name first.
+        """Searches matching user system accounts employing case-insensitive partial names.
+
+        Returns:
+            str: Enumeration of matching profiles displaying name and primary contact email.
         """
         async with lock:
             try:
@@ -385,9 +444,10 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=DeleteTicketSchema)
     async def delete_ticket(ticket_id: str) -> str:
-        """
-        Request permanent deletion of a ticket. Always pauses for human approval
-        before anything is deleted — the UI shows a confirmation dialog.
+        """Issues a deletion request signal triggering human-in-the-loop approval gateways.
+
+        Returns:
+            str: Specially serialized confirmation signal to be intercepted by the SSE router.
         """
         async with lock:
             try:

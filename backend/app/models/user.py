@@ -1,5 +1,4 @@
-"""
-User model.
+"""User database model mapping.
 
 Users are created automatically on first Google OAuth login — there is no
 manual registration flow. The data (email, name, avatar) comes directly
@@ -17,6 +16,12 @@ from app.db.base import Base
 
 
 class User(Base):
+    """Represents an authenticated user entity in the system.
+
+    Acts as the parent record for tickets and comments. Mapped identities are
+    bootstrapped dynamically upon initial OAuth successful handshakes.
+    """
+
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -36,5 +41,9 @@ class User(Base):
 
     @property
     def display_name(self) -> str:
-        """Returns name if available, otherwise email."""
+        """Retrieves the primary string representation for the user.
+
+        Returns:
+            str: The user's display name, falling back to email if not provided.
+        """
         return self.name or self.email or "Unknown User"

@@ -1,5 +1,4 @@
-"""
-LangGraph AI agent definition.
+"""LangGraph AI Agent orchestration and provider routing.
 
 Uses langgraph.prebuilt.create_react_agent — a pre-built ReAct agent that:
   1. Sends the conversation to the LLM.
@@ -84,6 +83,17 @@ Guidelines:
 
 
 def _resolve_primary_choice(preferred_provider: str | None) -> tuple[str, str]:
+    """Resolves the target AI provider and concrete LLM model name mapping.
+
+    Evaluates runtime overrides against environment variables and system settings
+    to compute a fallback-ready model pairing.
+
+    Args:
+        preferred_provider: Optional string key to override settings defaults.
+
+    Returns:
+        tuple[str, str]: A resolved (provider_name, model_name) tuple.
+    """
     normalized = (preferred_provider or "auto").lower()
     if normalized == "openai":
         return "openai", "gpt-4o-mini"
@@ -97,14 +107,36 @@ def _resolve_primary_choice(preferred_provider: str | None) -> tuple[str, str]:
 
 @lru_cache(maxsize=4)
 def get_llm(preferred_provider: str | None = None) -> BaseChatModel:
-    """
-    Return a cached LLM instance for the requested provider preference.
-    Always keeps the opposite provider as fallback when credentials exist.
+    """Retrieves a cached language model instance with established fallback bindings.
+
+    Applies LRU caching to the constructed chat interfaces ensuring efficient
+    object reuse across discrete request life cycles.
+
+    Args:
+        preferred_provider: Optional explicit provider selection to initialize.
+
+    Returns:
+        BaseChatModel: A configured LangChain language model ready for invocation.
     """
     return _build_llm(preferred_provider)
 
 
 def _build_llm(preferred_provider: str | None = None) -> BaseChatModel:
+    """Constructs the active LLM engine bindings and binds error fallbacks.
+
+    Instantiates the primary chat model (Google or OpenAI) and wraps it inside
+    an automated fallback wrapper using the secondary provider credentials
+    to prevent transient outage failures.
+
+    Args:
+        preferred_provider: The explicitly requested primary provider identifier.
+
+    Returns:
+        BaseChatModel: An instantiated chat model, potentially wrapped with fallbacks.
+
+    Raises:
+        ValueError: If crucial API key configurations for the chosen provider are missing.
+    """
     primary_provider, primary_model = _resolve_primary_choice(preferred_provider)
 
     if primary_provider == "google":
@@ -191,8 +223,20 @@ def build_agent(
     metrics_tracker: AIRunTracker | None = None,
     preferred_provider: str | None = None,
 ):
-    """
-    Build a ReAct agent for a single request.
+    """Assembles a contextualized ReAct agent bound to a single runtime lifecycle.
+
+    Compiles the runtime LangGraph integrating the LLM provider, custom database tools,
+    PostgreSQL conversation persistence checkpointers, and security metadata.
+
+    Args:
+        db: The active database session passed down to the functional tools layer.
+        actor: The authenticated User entity acting as the agent supervisor.
+        system_context: Supplementary prompt directives or frontend UI state snapshots.
+        metrics_tracker: Custom analytical recorder emitting logs to telemetry storage.
+        preferred_provider: Override option to enforce a specific model execution.
+
+    Returns:
+        CompiledGraph: An executable LangGraph agent instance ready to stream events.
     """
     llm = get_llm(preferred_provider)
     tools = make_tools(db, actor, metrics_tracker=metrics_tracker)

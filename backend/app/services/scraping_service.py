@@ -1,3 +1,10 @@
+"""Asynchronous background URL scrapers and indexers.
+
+Offloads CPU-bound web extraction processes to dedicated threaded execution,
+leveraging trafilatura for optimal noise removal. Persists vector context and distributes
+real-time telemetry notifying users upon scrape finalization.
+"""
+
 import asyncio
 import logging
 import trafilatura
@@ -10,15 +17,14 @@ from app.models.knowledge_chunk import KnowledgeChunk
 logger = logging.getLogger(__name__)
 
 async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
-    """
-    Scrapes a URL, extracts clean text, and indexes it into the vector DB.
-    
-    This task runs in the background. It uses asyncio.to_thread to prevent 
-    the synchronous trafilatura calls from blocking the FastAPI event loop.
-    
+    """Fetches a URL, sanitizes rich HTML layouts, and indexes embeddings as background task.
+
+    Uses asyncio execution wrappers preventing blocking locks on the primary main-loop.
+    Broadcasts localized UI status notifications at analysis start and completion.
+
     Args:
-        ticket_id: UUID of the ticket this context belongs to.
-        url: The client website URL to analyze.
+        ticket_id: Target ticket reference UUID for contextual binding.
+        url: Remote client HTTP address to crawl and process.
     """
     logger.info(f"Scraping Service: Starting analysis for ticket {ticket_id} -> {url}")
     
@@ -49,7 +55,6 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
     
     try:
         # 1. Download and extract text (Offloaded to a thread to avoid blocking)
-        # trafilatura is synchronous, so we use to_thread
         downloaded = await asyncio.to_thread(trafilatura.fetch_url, url)
         if not downloaded:
             logger.error(f"Scraping Service: Failed to fetch URL {url}")
@@ -61,11 +66,9 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
             return
             
         # 2. Content Preparation
-        # We take up to 4000 chars for a rich but manageable context
         content = text[:4000] 
         
         # 3. Generate embedding
-        # This is already an async service call
         from app.services.embedding_service import generate_embedding
         embedding = await generate_embedding(content, task_type="RETRIEVAL_DOCUMENT")
         
@@ -74,7 +77,6 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
             return
 
         # 4. Persistence
-        # We use the factory to create a dedicated session for this background task
         async with async_session_factory() as db:
             # 4.1 Save to Knowledge base (RAG)
             chunk = KnowledgeChunk(
@@ -90,8 +92,7 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
             )
             db.add(chunk)
 
-            # 4.2 Seed client_summary on first scrape only — never overwrite a
-            # human-edited summary on subsequent refreshes.
+            # 4.2 Seed client_summary on first scrape only
             from app.models.ticket import Ticket
             from sqlalchemy import select
             ticket_res = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
@@ -111,7 +112,6 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
             )
             from app.schemas.websocket import WSMessageType
 
-            # Notify both author and assignee
             users_to_notify = {ticket.author_id}
             if ticket.assignee_id:
                 users_to_notify.add(ticket.assignee_id)
@@ -137,4 +137,3 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
         
     except Exception as e:
         logger.error(f"Scraping Service: Critical error for ticket {ticket_id}: {str(e)}", exc_info=True)
-

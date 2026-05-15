@@ -1,7 +1,6 @@
-"""
-FastAPI application entry point.
+"""Creates and configures the FastAPI application instance.
 
-This module creates and configures the FastAPI app. Key responsibilities:
+Key responsibilities:
   1. CORS: allow the Next.js frontend to call the API from a different origin.
   2. Lifespan: on startup, create the MinIO bucket if it doesn't exist, then start
      the PostgreSQL LISTEN loop that pushes notifications to WebSocket clients.
@@ -36,6 +35,16 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manages the FastAPI application lifecycle.
+
+    On startup, it executes environment variable diagnostics, configures LangSmith,
+    initializes object storage and checkpointer resources, and launches the background
+    real-time notification listeners.
+    On shutdown, it gracefully cancels listeners and tears down resource pools.
+
+    Args:
+        app: The FastAPI application instance.
+    """
     # Startup diagnostics
     import logging
     logger = logging.getLogger(__name__)
@@ -85,10 +94,10 @@ async def lifespan(app: FastAPI):
 
 
 def _init_langsmith() -> None:
-    """
-    Configure LangSmith tracing by propagating settings to the env vars that
-    LangChain reads automatically. This way the .env file works in dev and
-    Railway env vars work in production — both paths go through pydantic-settings.
+    """Configures LangSmith tracing by propagating settings to system environment variables.
+
+    Maps application settings directly to the environment keys auto-detected by LangChain,
+    enabling transparent agent lifecycle tracing in both dev and production runners.
     """
     if not settings.LANGSMITH_TRACING or not settings.LANGSMITH_API_KEY:
         logger.info("LangSmith tracing disabled")
@@ -102,11 +111,13 @@ def _init_langsmith() -> None:
 
 
 async def _init_storage() -> None:
-    """
-    Create the attachments bucket in MinIO/Cloudflare R2 if it doesn't exist.
+    """Initializes the object storage bucket for attachments.
 
-    We use the synchronous boto3 client here because this only runs once at startup
-    (not in a hot path). The bucket check is idempotent — safe to run on every restart.
+    Checks for the existence of the configured bucket in MinIO or Cloudflare R2 and
+    creates it if missing. Runs as an idempotent procedure during application startup.
+
+    Raises:
+        ClientError: If connectivity or credentials prevent bucket interrogation or creation.
     """
     s3 = boto3.client(
         "s3",
@@ -125,20 +136,13 @@ async def _init_storage() -> None:
 
 
 async def _pg_listen_loop() -> None:
-    """
-    Permanent background task that listens for PostgreSQL NOTIFY events.
+    """Listens for database notification triggers in a persistent background task.
 
-    How it works:
-      1. A direct asyncpg connection (not from SQLAlchemy pool) subscribes to
-         the 'notifications' channel.
-      2. When any DB operation triggers NOTIFY 'notifications', '<json_payload>',
-         this callback fires and pushes the payload to the target user's WebSocket(s).
-      3. The loop runs until the application shuts down (CancelledError).
+    Establishes a dedicated, long-lived database connection via asyncpg to subscribe
+    to the 'notifications' channel. Relays any incoming JSON payloads to WebSocket clients.
 
-    Why asyncpg directly instead of SQLAlchemy?
-      SQLAlchemy's async session is designed for request-response queries.
-      asyncpg's LISTEN requires a persistent long-lived connection with a callback,
-      which maps perfectly to a background task.
+    Uses asyncpg directly instead of SQLAlchemy as SQLAlchemy is structurally designed
+    for discrete request-response cycles rather than long-running callbacks.
     """
     # Build a raw asyncpg connection URL (asyncpg uses its own URL format)
     raw_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
@@ -146,7 +150,14 @@ async def _pg_listen_loop() -> None:
     conn: asyncpg.Connection = await asyncpg.connect(raw_url)
 
     async def on_notification(connection, pid, channel, payload):
-        """Callback invoked by asyncpg when a NOTIFY arrives."""
+        """Handles incoming PostgreSQL NOTIFY message payloads.
+
+        Args:
+            connection: The current active asyncpg connection.
+            pid: The process ID of the notifying database backend.
+            channel: The string identifier of the notification channel.
+            payload: The JSON string frame delivered by the trigger.
+        """
         try:
             data = json.loads(payload)
             user_id = data.get("user_id")
@@ -209,5 +220,9 @@ app.include_router(knowledge.router, prefix="/api/v1")
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """Simple health endpoint for Docker/Railway health checks."""
+    """Executes a basic service health check.
+
+    Returns:
+        dict: A dictionary status report containing health metrics and versions.
+    """
     return {"status": "ok", "version": "0.1.1"}

@@ -1,23 +1,8 @@
-"""
-Ticket routes — CRUD + filtering + pagination + sorting + hybrid search.
+"""Core Ticket Engine API Router.
 
-Search strategy:
-  When a `search` query param is provided:
-  1. Generate a vector embedding of the query (Google text-embedding-004).
-  2. If embedding succeeds → run hybrid search:
-     - semantic ranking by cosine similarity against stored ticket embeddings
-     - keyword ranking over title/description matches
-     - fuse both rankings with Reciprocal Rank Fusion (RRF)
-  3. If embedding fails (no API key, service down) → keyword fallback: ilike
-     on title and description (same behavior as before pgvector).
-
-  This means the API degrades gracefully in tests and local dev without an
-  API key, while delivering hybrid semantic + keyword retrieval in production.
-
-Embedding side-effects on writes:
-  - POST /tickets: embedding generated after commit (fire-and-forget).
-  - PATCH /tickets/{id}: embedding regenerated if title or description changed.
-  Both use asyncio.create_task so they don't add latency to the response.
+Integrates advanced Ticket resource CRUD mappings incorporating param-hashed Redis caches,
+sequential audit tracking, hybrid semantic/lexical search rankings (pgvector), and 
+concurrent streaming SSE diagnostic generation routines with built-in telemetry hooks.
 """
 
 import asyncio
@@ -49,7 +34,7 @@ from app.schemas.websocket import WSMessageType
 from app.models.knowledge_chunk import KnowledgeChunk
 
 CACHE_PREFIX = "tickets:"
-CACHE_TTL = 60  # seconds
+CACHE_TTL = 60
 
 router = APIRouter(prefix="/tickets", tags=["Tickets"])
 
@@ -64,11 +49,9 @@ SORTABLE_COLUMNS = {
 
 
 async def _resolve_ticket_or_raise(db: DB, ticket_ref: str) -> Ticket:
-    """
-    Resolve a ticket reference with stable validation semantics.
+    """Resolves raw string references into robust validated Ticket instances.
 
-    The API accepts both sequential numbers and legacy UUIDs, but malformed
-    values should be rejected as validation errors instead of "not found".
+    Parses and normalizes sequential long identifiers or standard UUIDv4 hashes.
     """
     if not ticket_service.is_valid_ticket_ref(ticket_ref):
         raise HTTPException(
@@ -95,8 +78,12 @@ async def list_tickets(
     page: int = Query(1, ge=1),
     size: int = Query(25, ge=1, le=100),
 ):
-    # Cache key = hash of all query params so each search/filter/page combination
-    # is cached independently.
+    """Aggregates, filters, and searches persistent Ticket resource collections.
+
+    Derives dynamic MD5 cache identifiers using the combination of applied query parameters,
+    preventing redundant vector distance processing or intensive database joins.
+    Applies Reciprocal Rank Fusion if semantic indexing parameters are active.
+    """
     cache_params = {
         "status": status.value if status else None,
         "priority": priority.value if priority else None,
@@ -116,8 +103,8 @@ async def list_tickets(
         return TicketListResponse(**cached)
 
     query = select(Ticket).options(
-        selectinload(Ticket.author),    # type: ignore[attr-defined]
-        selectinload(Ticket.assignee),  # type: ignore[attr-defined]
+        selectinload(Ticket.author),
+        selectinload(Ticket.assignee),
     )
 
     if status is not None:
@@ -154,6 +141,7 @@ async def list_tickets(
 
 @router.post("", response_model=TicketOut, status_code=status.HTTP_201_CREATED, summary="Create a ticket")
 async def create_ticket(body: TicketCreate, db: DB, current_user: CurrentUser):
+    """Persists new Ticket entities executing global cache flushes."""
     ticket = await ticket_service.create_ticket(
         db=db,
         title=body.title,
@@ -165,12 +153,12 @@ async def create_ticket(body: TicketCreate, db: DB, current_user: CurrentUser):
         client_summary=body.client_summary,
     )
     await cache_invalidate_prefix(CACHE_PREFIX)
-
     return ticket
 
 
 @router.get("/{ticket_ref}", response_model=TicketOut, summary="Get a ticket by number")
 async def get_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
+    """Extracts fully loaded ticket node details targeting specific cache keys."""
     cache_key = f"{CACHE_PREFIX}detail:{ticket_ref}"
     cached = await cache_get(cache_key)
     if cached is not None:
@@ -189,6 +177,7 @@ async def update_ticket(
     db: DB,
     current_user: CurrentUser,
 ):
+    """Processes delta updates on validated ticket instances invalidating cache keys."""
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     update_data = body.model_dump(exclude_unset=True)
@@ -205,6 +194,7 @@ async def update_ticket(
 
 @router.get("/{ticket_ref}/history", summary="Get audit history for a ticket")
 async def get_ticket_history(ticket_ref: str, db: DB, current_user: CurrentUser):
+    """Retrieves chronological transition states reflecting ticket auditing trails."""
     from app.services import history_service
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     return await history_service.get_history(db, ticket.id)
@@ -217,10 +207,14 @@ async def generate_reply_draft(
     db: DB,
     current_user: CurrentUser,
 ):
+    """Generates contextual AI response drafts wrapping calls inside transactional telemetries.
+
+    Raises:
+        HTTPException (502): Raised when remote LLM providers respond with connection errors.
+    """
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     preferred_provider = body.preferred_provider or "auto"
-    # Keep the provider-selection rules identical to chat/diagnosis so metrics stay comparable.
     tracker = ai_metrics_service.AIRunTracker(
         surface="reply_draft",
         user_id=current_user.id,
@@ -255,7 +249,6 @@ async def generate_reply_draft(
         )
         return ReplyDraftResponse(draft=draft, ai_run_id=ai_run.id)
     except Exception as exc:
-        # Convert provider/library failures into a stable API contract for the frontend.
         await ai_metrics_service.finalize_ai_run(
             db,
             ai_run,
@@ -271,6 +264,10 @@ async def generate_reply_draft(
 
 @router.delete("/{ticket_ref}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a ticket")
 async def delete_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
+    """Permanently removes Incident logs requiring direct author validations.
+
+    Triggers global WebSockets push alerts notifying connected clients about deletion.
+    """
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     if ticket.author_id != current_user.id:
@@ -285,7 +282,6 @@ async def delete_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
     await db.delete(ticket)
     await db.commit()
 
-    # Notify after commit so the ticket_id FK is already gone
     await notification_service.notify_ticket_deleted(db, ticket_id, title, current_user)
     await db.commit()
 
@@ -294,12 +290,12 @@ async def delete_ticket(ticket_ref: str, db: DB, current_user: CurrentUser):
         data={"id": str(ticket_id), "title": title},
         db=db
     )
-
     await cache_invalidate_prefix(CACHE_PREFIX)
 
 
 @router.post("/{ticket_ref}/deletion-request", summary="Ask the author to delete a ticket")
 async def request_ticket_deletion(ticket_ref: str, db: DB, current_user: CurrentUser):
+    """Issues internal alerts asking verified authors to clear foreign tickets."""
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
     if ticket.author_id == current_user.id:
@@ -326,7 +322,11 @@ async def get_diagnosis(
     current_user: CurrentUser,
     preferred_provider: str | None = None,
 ):
-    """Generate an AI diagnosis and suggested solution for a ticket (streamed)."""
+    """Initiates Server-Sent Events streams calculating real-time multi-agent RAG diagnostics.
+
+    Retrieves parallel context injections, feeds diagnostic generator loops, and yields
+    incremental token packets finalizing monetary execution metrics on connection termination.
+    """
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     observability.increment_diagnosis()
     tracker = ai_metrics_service.AIRunTracker(
@@ -384,11 +384,7 @@ async def get_ticket_web_context(
     db: DB,
     current_user: CurrentUser,
 ):
-    """Fetches the latest AI-extracted web context for this ticket.
-
-    Filters on metadata.type so attachments ingested into the same knowledge
-    base do not shadow the scrape result.
-    """
+    """Queries internal DB indices retrieving parsed remote client web scraping text nodes."""
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     result = await db.execute(
         select(KnowledgeChunk)
@@ -409,7 +405,7 @@ async def refresh_ticket_web_scrape(
     db: DB,
     current_user: CurrentUser,
 ):
-    """Manually triggers a new web scrape for the ticket's URL."""
+    """Spawns detached backplane routines refreshing remote vector crawl caches."""
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     if not ticket.client_url:
         raise HTTPException(status_code=400, detail="Ticket has no URL to scrape.")
@@ -417,16 +413,8 @@ async def refresh_ticket_web_scrape(
     return {"status": "scraping_started"}
 
 
-# ─── Private helpers ──────────────────────────────────────────────────────────
-
-
 async def _embed_ticket(ticket_id: uuid.UUID, title: str, description: str | None) -> None:
-    """
-    Background task: generate and persist a ticket's embedding.
-
-    Opens its own DB session (independent of the request session which is
-    already closed by the time this task runs).
-    """
+    """Asynchronous secondary execution routine updating multidimensional vector vectors."""
     embedding = await generate_ticket_embedding(title, description)
     if embedding is None:
         return

@@ -1,5 +1,4 @@
-"""
-Notification model.
+"""Notification database model and triggering enumeration schemas.
 
 Notifications are created automatically by the system when specific events occur:
   - A ticket is assigned to a user → notify the assignee
@@ -20,7 +19,7 @@ from app.db.base import Base
 
 
 class NotificationType(str, enum.Enum):
-    """The event that triggered this notification."""
+    """Delineates the system action or state boundary that triggered a notification."""
     assigned = "assigned"          # A ticket was assigned/reassigned to the user
     commented = "commented"        # A new comment was added to a ticket the user is involved in
     status_changed = "status_changed"  # A ticket's status changed
@@ -31,6 +30,12 @@ class NotificationType(str, enum.Enum):
 
 
 class Notification(Base):
+    """Represents a system-generated activity alert intended for a specific user.
+
+    Persists alert state and facilitates delivery payloads for both WebSocket relays
+    and the frontend persistence badge tracking.
+    """
+
     __tablename__ = "notifications"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

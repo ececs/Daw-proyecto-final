@@ -1,5 +1,4 @@
-"""
-WebSocket connection manager.
+"""WebSocket connection manager.
 
 This module manages the lifecycle of all active WebSocket connections.
 It is the bridge between server-side events (PostgreSQL NOTIFY messages)
@@ -25,19 +24,23 @@ from app.schemas.websocket import WSMessage
 
 
 class WebSocketManager:
-    """Thread-safe (within async event loop) manager for WebSocket connections."""
+    """Manages active WebSocket client connections inside the asyncio event loop.
+
+    Handles registration, teardown, and delivery routing of real-time payloads
+    supporting multi-tab routing by mapping single user identities to list pools
+    of network sockets.
+    """
 
     def __init__(self) -> None:
         # Dict mapping user UUID -> list of active WebSocket connections for that user
         self.connections: dict[str, list[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: uuid.UUID) -> None:
-        """
-        Accept a new WebSocket connection and register it for the given user.
+        """Accepts a new WebSocket connection and registers it for the specified user.
 
         Args:
-            websocket: The FastAPI WebSocket object.
-            user_id: The authenticated user's UUID (used as the channel key).
+            websocket: The FastAPI WebSocket instance to register.
+            user_id: The authenticated UUID identity of the user.
         """
         await websocket.accept()
         key = str(user_id)
@@ -46,12 +49,13 @@ class WebSocketManager:
         self.connections[key].append(websocket)
 
     def disconnect(self, websocket: WebSocket, user_id: uuid.UUID) -> None:
-        """
-        Remove a WebSocket connection when the client disconnects.
+        """Deregisters and removes a WebSocket connection upon client disconnection.
+
+        Performs memory pool cleanup by purging mapping keys associated with zero active sockets.
 
         Args:
-            websocket: The WebSocket to remove.
-            user_id: The user whose connection list to update.
+            websocket: The disconnected WebSocket instance to drop.
+            user_id: The UUID identity owner of the target socket list.
         """
         key = str(user_id)
         if key in self.connections:
@@ -63,14 +67,23 @@ class WebSocketManager:
                 del self.connections[key]
 
     async def broadcast_to_all(self, data: dict | WSMessage) -> None:
-        """Send a payload to every connected user (global broadcast)."""
+        """Transmits a JSON payload to every currently active user socket connection.
+
+        Args:
+            data: The payload dictionary or validated WSMessage model to broadcast.
+        """
         for user_id in list(self.connections.keys()):
             await self.broadcast_to_user(user_id, data)
 
     async def broadcast_to_user(self, user_id: str, data: dict | WSMessage) -> None:
-        """
-        Send a payload to all active connections for a specific user.
-        Validates data if it's a WSMessage object.
+        """Transmits a payload to all active connection sockets owned by a specific user.
+
+        Handles runtime encoding from direct JSON dictionaries or structured validation
+        objects. Automatically intercepts broken connections, dropping them from the pool.
+
+        Args:
+            user_id: The target user UUID string identifier.
+            data: The validated WSMessage model or dictionary framing the notification.
         """
         if user_id not in self.connections:
             return 

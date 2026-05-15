@@ -1,5 +1,8 @@
-"""
-Attachment routes.
+"""File storage attachment controller API.
+
+Coordinates secure payload uploads, metadata listings, and object deletions.
+Validates binary constraints including maximum file footprints (MB) and allowed
+mime-type whitelist configurations.
 """
 
 import uuid
@@ -23,6 +26,11 @@ MAX_BYTES = settings.MAX_ATTACHMENT_SIZE_MB * 1024 * 1024
     summary="List attachments for a ticket",
 )
 async def list_attachments(ticket_ref: str, db: DB, current_user: CurrentUser):
+    """Lists file assets belonging to referenced ticket entities.
+
+    Raises:
+        HTTPException (404): Emitted when invalid ticket identifiers are targeted.
+    """
     ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -41,6 +49,15 @@ async def upload_attachment(
     db: DB,
     current_user: CurrentUser,
 ):
+    """Streams user binary uploads directly to persistent bucket storage instances.
+
+    Applies strict validation filters regarding raw content dimensions and mime classes
+    prior to executing secondary service pushes.
+
+    Raises:
+        HTTPException (413): Triggered upon files exceeding maximum size ceilings.
+        HTTPException (415): Emitted upon unauthorized binary content classes.
+    """
     content = await file.read()
 
     if len(content) > MAX_BYTES:
@@ -93,6 +110,14 @@ async def delete_attachment(
     db: DB,
     current_user: CurrentUser,
 ):
+    """Destroys specific persistent storage assets tied to validated ticket nodes.
+
+    Restricts execution authorization verifying direct file ownership bounds.
+
+    Raises:
+        HTTPException (404): When referenced attachments do not exist.
+        HTTPException (403): Upon foreign asset destruction attempts.
+    """
     ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -127,6 +152,7 @@ async def toggle_attachment_rag(
     db: DB,
     current_user: CurrentUser,
 ):
+    """Updates indexing inclusion state triggers for target binary attachments."""
     attachment = await attachment_service.update_attachment_rag(
         db, attachment_id=attachment_id, use_for_rag=use_for_rag
     )

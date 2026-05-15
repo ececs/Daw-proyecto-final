@@ -1,12 +1,8 @@
-"""
-RAG knowledge service — scrape, chunk, embed, store, and retrieve.
+"""RAG knowledge base pipeline and semantic ingestion service.
 
-Flow:
-  ingest_url()  — fetch a URL with trafilatura, split into ~500-char chunks,
-                  generate embeddings, delete old chunks for the same URL,
-                  bulk-insert new ones.
-  search()      — embed a query and return the top-k most similar chunks.
-                  Falls back to full-text ILIKE if no API key is available.
+Implements standard content chunking, multi-format attachment extraction, and vector-space
+distance lookups using pgvector operators. Manages text extraction from binary file uploads
+including PDFs, Microsoft Word documents, and plain text assets.
 """
 
 import asyncio
@@ -29,20 +25,20 @@ CHUNK_OVERLAP = 50
 
 @dataclass
 class KnowledgeSearchStats:
+    """Data container tracking quantitative outcomes returned by vector searches."""
     chunks: list[KnowledgeChunk]
     source_type: str
 
     @property
     def hits(self) -> int:
+        """Measures the discrete number of valid semantic chunks returned."""
         return len(self.chunks)
 
 
 def _chunk_text(text: str) -> list[str]:
-    """
-    Split text into overlapping chunks of ~CHUNK_SIZE chars.
+    """Splits source text arrays into normalized spans utilizing a static overlap boundary.
 
-    Splits on paragraph boundaries first, then merges short paragraphs
-    until the target size is reached.
+    Optimized to divide first along paragraph line-breaks before executing hard truncation.
     """
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     chunks: list[str] = []
@@ -54,7 +50,6 @@ def _chunk_text(text: str) -> list[str]:
         else:
             if current:
                 chunks.append(current)
-            # Para itself longer than CHUNK_SIZE — hard-split it
             while len(para) > CHUNK_SIZE:
                 chunks.append(para[:CHUNK_SIZE])
                 para = para[CHUNK_SIZE - CHUNK_OVERLAP:]
@@ -67,16 +62,12 @@ def _chunk_text(text: str) -> list[str]:
 
 
 async def ingest_url(db: AsyncSession, url: str) -> dict:
-    """
-    Scrape a URL, chunk, embed, and persist to knowledge_chunks.
+    """Fetches HTML pages, applies paragraph chunking, embeds, and saves to PostgreSQL.
 
-    Idempotent: deletes any existing chunks for the URL before inserting.
-
-    Returns:
-        {"url": str, "chunks_created": int}
+    Operates idempotently, purging stale historical chunks sharing identical target URLs.
 
     Raises:
-        ValueError if the URL could not be scraped or yields no text.
+        ValueError: If URL fetch yields zero content or network-level faults occur.
     """
     import trafilatura
 
@@ -97,12 +88,10 @@ async def ingest_url(db: AsyncSession, url: str) -> dict:
     if not chunks:
         raise ValueError("No content found after chunking")
 
-    # Embed all chunks concurrently
     embeddings: list[Optional[list[float]]] = await asyncio.gather(
         *[generate_embedding(c, task_type="RETRIEVAL_DOCUMENT") for c in chunks]
     )
 
-    # Remove stale chunks for this URL (idempotent re-index)
     await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.url == url))
 
     rows = [
@@ -122,15 +111,9 @@ async def ingest_url(db: AsyncSession, url: str) -> dict:
 
 
 def _extract_text(content: bytes, mime_type: str) -> str:
-    """
-    Extract plain text from file bytes based on MIME type.
+    """Dispatches specific binary bytes parsers mapping incoming MIME standards.
 
-    Supports the three RAG-eligible types:
-      - application/pdf            → pypdf page-by-page extraction
-      - text/plain                 → direct UTF-8 decode
-      - application/vnd...docx    → python-docx paragraph join
-
-    Raises ValueError for unsupported types so callers can surface a clean error.
+    Currently parses PDF (pypdf), DOCX (python-docx), and TXT (UTF-8 codec).
     """
     if mime_type == "application/pdf":
         import io
@@ -159,17 +142,9 @@ async def ingest_attachment(
     content: bytes,
     mime_type: str,
 ) -> dict:
-    """
-    Extract text from an attachment, chunk, embed, and persist to knowledge_chunks.
+    """Parses uploaded file byte contents into vectorized knowledge indexes.
 
-    Uses a synthetic url of ``attachment:<attachment_id>`` as the stable key so
-    existing chunks can be replaced idempotently on re-toggle.
-
-    Returns:
-        {"attachment_id": str, "chunks_created": int}
-
-    Raises:
-        ValueError if text extraction fails or yields no content.
+    Synthesizes stable artificial URLs identifying attachment-owned chunk groups.
     """
     text = _extract_text(content, mime_type)
     if not text:
@@ -184,7 +159,6 @@ async def ingest_attachment(
     )
 
     synthetic_url = f"attachment:{attachment_id}"
-    # Remove any stale chunks for this attachment (idempotent re-index)
     await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.url == synthetic_url))
 
     rows = [
@@ -205,22 +179,23 @@ async def ingest_attachment(
 
 
 async def delete_attachment_chunks(db: AsyncSession, attachment_id: str) -> None:
-    """Remove all knowledge chunks associated with an attachment."""
+    """Deletes all indexed vector fragments mapped to a single attachment file."""
     synthetic_url = f"attachment:{attachment_id}"
     await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.url == synthetic_url))
     await db.commit()
 
 
 async def search(db: AsyncSession, query: str, k: int = 5, ticket_id: Optional[str] = None) -> list[str]:
-    """
-    Return the top-k knowledge chunks most relevant to `query`.
-    If ticket_id is provided, prioritizes or limits to chunks linked to that ticket.
+    """Recover Top-K textual excerpts bearing the highest similarity proximity to queries.
+
+    Delegates search processes to specialized tracking functions.
     """
     stats = await search_with_stats(db, query=query, k=k, ticket_id=ticket_id)
     return [row.content for row in stats.chunks]
 
 
 def _apply_ticket_filter(stmt, ticket_id: Optional[str]):
+    """Appends localized context filtering leveraging PostgreSQL's native JSONB paths."""
     if ticket_id:
         from sqlalchemy import func
         stmt = stmt.where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket_id))
@@ -228,6 +203,7 @@ def _apply_ticket_filter(stmt, ticket_id: Optional[str]):
 
 
 def _detect_source_type(chunks: list[KnowledgeChunk]) -> str:
+    """Identifies categorical metadata footprints to track active vector sources."""
     types = set()
     for chunk in chunks:
         metadata = chunk.chunk_metadata or {}
@@ -248,6 +224,13 @@ def _detect_source_type(chunks: list[KnowledgeChunk]) -> str:
 async def search_with_stats(
     db: AsyncSession, query: str, k: int = 5, ticket_id: Optional[str] = None
 ) -> KnowledgeSearchStats:
+    """Executes vectorized pgvector similarity search or falls back to ILIKE matching.
+
+    Determines the optimal path based on live embedding API operational availability.
+
+    Returns:
+        KnowledgeSearchStats: Enriched statistics container summarizing search metadata.
+    """
     query_embedding = await generate_embedding(query, task_type="RETRIEVAL_QUERY")
 
     if query_embedding is not None:

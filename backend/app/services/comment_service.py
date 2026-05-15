@@ -1,14 +1,8 @@
-"""
-Comment Service Module.
+"""Threaded commentary and ticket discussion management service.
 
-This service manages all business logic related to ticket comments.
-By centralizing these operations, we ensure that notifications and 
-validation are applied consistently regardless of whether the comment 
-comes from the REST API or the AI Assistant.
-
-Architecture (Senior Pattern):
-- Decoupling: Returns Pydantic schemas (`CommentOut`) instead of models.
-- Transactional: Ensures that comments and notifications are committed atomically.
+Orchestrates commenting lifecycles including creation, contextual listing,
+and secure actor-restricted deletions. Automatically dispatches transactional
+notifications to related actors upon successful persistence.
 """
 
 import uuid
@@ -25,15 +19,14 @@ from app.services import notification_service
 
 
 async def list_comments(db: AsyncSession, ticket_id: uuid.UUID) -> List[CommentOut]:
-    """
-    Retrieves all comments for a specific ticket, ordered by creation date.
+    """Recovers a chronological sequence of comments linked to a specific ticket.
 
     Args:
-        db: Database session.
-        ticket_id: UUID of the parent ticket.
+        db: Active asynchronous SQLAlchemy transactional database session.
+        ticket_id: The UUID key of the parent ticket being retrieved.
 
     Returns:
-        List[CommentOut]: Validated schemas for all comments found.
+        List[CommentOut]: Collection of serialized comments sorted by creation date.
     """
     result = await db.execute(
         select(Comment)
@@ -51,17 +44,20 @@ async def create_comment(
     content: str,
     author: User,
 ) -> Optional[CommentOut]:
-    """
-    Adds a comment to a ticket and triggers notifications to author/assignee.
+    """Creates a comment, persists it, and triggers side-effect notification flows.
+
+    Verifies ticket existence, records transaction, dispatches real-time user
+    notifications, and broadcasts update signals to frontend WebSocket clients.
 
     Args:
-        db: Database session.
-        ticket_id: Parent ticket UUID.
-        content: Comment body.
-        author: The User object who wrote the comment.
+        db: Active asynchronous SQLAlchemy database session.
+        ticket_id: UUID of the parent ticket.
+        content: Raw text body of the commentary record.
+        author: The User model representing the active commenter.
 
     Returns:
-        Optional[CommentOut]: The newly created comment, or None if ticket missing.
+        Optional[CommentOut]: Validated output schema representation of new comment,
+                              or None if the referenced parent ticket does not exist.
     """
     # 1. Verify ticket existence (needed for notification logic)
     ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
@@ -103,16 +99,15 @@ async def delete_comment(
     comment_id: uuid.UUID,
     actor_id: uuid.UUID,
 ) -> bool:
-    """
-    Removes a comment if the actor is the original author.
+    """Deletes a comment ensuring restricting operations strictly to the original author.
 
     Args:
-        db: Database session.
-        comment_id: Target comment UUID.
-        actor_id: UUID of the user attempting the deletion.
+        db: Active asynchronous SQLAlchemy database session.
+        comment_id: Unique identifier of the target comment.
+        actor_id: The unique UUID belonging to the attempting user.
 
     Returns:
-        bool: True if deleted, False if not found or unauthorized.
+        bool: True if deleted successfully, False if missing or unauthorized.
     """
     result = await db.execute(select(Comment).where(Comment.id == comment_id))
     comment = result.scalar_one_or_none()

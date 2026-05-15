@@ -1,5 +1,4 @@
-"""
-In-memory AI observability store.
+"""In-memory thread-safe AI observability telemetry store.
 
 Tracks provider, active model, fallback availability, last error, and a
 cumulative tool-action counter. State resets on process restart — this is
@@ -17,6 +16,7 @@ from typing import Optional
 
 @dataclass
 class _AIState:
+    """Encapsulates core operational usage metrics in a memory structure."""
     provider: str = "unknown"
     model: str = "unknown"
     fallback_available: bool = False
@@ -50,7 +50,14 @@ def configure(
     fallback_available: bool,
     fallback_model: Optional[str] = None,
 ) -> None:
-    """Called once when the agent is built to register active model info."""
+    """Registers static deployment info for the active AI provider engine.
+
+    Args:
+        provider: String ID representing the primary provider.
+        model: The primary LLM deployment model identifier.
+        fallback_available: Flag denoting if a secondary LLM model is active.
+        fallback_model: String name of the optional fallback LLM.
+    """
     with _lock:
         _state.provider = provider
         _state.model = model
@@ -59,27 +66,31 @@ def configure(
 
 
 def increment_action() -> None:
-    """Increment the tool-action counter. Called on every agent tool_end event."""
+    """Increments the cumulative counter tracking discrete agent tool executions."""
     with _lock:
         _state.action_count += 1
 
 
 def increment_chat() -> None:
-    """Called on each POST /ai/chat request."""
+    """Tracks the arrival of an incoming chat endpoint message execution."""
     with _lock:
         _state.chat_count += 1
         _state.last_surface = "chat"
 
 
 def increment_diagnosis() -> None:
-    """Called when a streaming AI diagnosis is started."""
+    """Registers the bootstrap initiation of a streaming ticket diagnostic run."""
     with _lock:
         _state.diagnoses_count += 1
         _state.last_surface = "diagnosis"
 
 
 def increment_rag_query(had_results: bool) -> None:
-    """Called on each search_knowledge tool call."""
+    """Captures executing knowledge base queries assessing retrieval hit yields.
+
+    Args:
+        had_results: Denotes whether the executed query returned documents.
+    """
     with _lock:
         _state.rag_queries_count += 1
         if had_results:
@@ -87,6 +98,13 @@ def increment_rag_query(had_results: bool) -> None:
 
 
 def record_rag(queries: int, hits: int, source: str) -> None:
+    """Aggregates batch RAG execution counters reflecting multiple retrieval passes.
+
+    Args:
+        queries: The number of sequential search queries triggered.
+        hits: Combined count of queries successfully resolving context docs.
+        source: String describing provenance (e.g., URL list, attachment key).
+    """
     with _lock:
         _state.rag_queries_count += max(0, queries)
         _state.rag_hits_count += max(0, hits)
@@ -94,11 +112,19 @@ def record_rag(queries: int, hits: int, source: str) -> None:
 
 
 def record_fallback() -> None:
+    """Records an instance of the agent recovering through secondary fallback invocation."""
     with _lock:
         _state.fallback_count += 1
 
 
 def record_success(surface: str, latency_ms: Optional[int], rag_source: Optional[str] = None) -> None:
+    """Logs a completed successfully agent execution calculating rolling latencies.
+
+    Args:
+        surface: Identifier mapping endpoint origin ('chat', 'diagnosis').
+        latency_ms: Total duration in milliseconds to process requests.
+        rag_source: String origin identification for referenced knowledge.
+    """
     with _lock:
         _state.success_count += 1
         _state.last_surface = surface
@@ -112,7 +138,12 @@ def record_success(surface: str, latency_ms: Optional[int], rag_source: Optional
 
 
 def record_error(message: str, surface: Optional[str] = None) -> None:
-    """Store the most recent error message with a UTC timestamp."""
+    """Stores failure logs attaching sanitized stack trace snippets and timestamps.
+
+    Args:
+        message: Raw exception or error message to capture.
+        surface: Origin triggering context string identity.
+    """
     with _lock:
         _state.error_count += 1
         _state.last_error = message[:300]
@@ -122,7 +153,11 @@ def record_error(message: str, surface: Optional[str] = None) -> None:
 
 
 def get_status() -> dict:
-    """Return a snapshot of the current observability state."""
+    """Generates a point-in-time dictionary serialization of all live telemetry.
+
+    Returns:
+        dict: Operational health map describing provider health and active usage.
+    """
     with _lock:
         return {
             "provider": _state.provider,

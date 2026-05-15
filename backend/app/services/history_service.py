@@ -1,8 +1,7 @@
-"""
-History service — append-only audit log for ticket changes.
+"""Append-only audit trail management service.
 
-Every write that goes through ticket_service calls record_change() here.
-The service only appends rows; it never mutates or deletes them.
+Persists point-in-time snapshots tracking property deltas triggered by system mutation events.
+Maintains a historical integrity boundary by disallowing internal deletions or updates.
 """
 
 import uuid
@@ -22,7 +21,16 @@ async def record_change(
     old_value: str | None,
     new_value: str | None,
 ) -> None:
-    """Append one history entry. Caller is responsible for the final commit."""
+    """Appends a single delta mutation log to the ticket's audit history trail.
+
+    Args:
+        db: Active asynchronous SQLAlchemy transactional session.
+        ticket_id: The UUID key of the target ticket being audited.
+        actor_id: The UUID identification key of the user driving the mutation.
+        field: Textual field name undergoing state modification.
+        old_value: Text string of the prior value before mutation.
+        new_value: Text string of the new state value after committing.
+    """
     entry = TicketHistory(
         ticket_id=ticket_id,
         actor_id=actor_id,
@@ -39,6 +47,18 @@ async def get_history(
     ticket_id: uuid.UUID,
     limit: int = 100,
 ) -> list[TicketHistoryOut]:
+    """Retrieves chronological change records associated with a single ticket.
+
+    Uses eager loading for the associated Actor profile to minimize N+1 queries.
+
+    Args:
+        db: Active asynchronous SQLAlchemy database session.
+        ticket_id: Unique UUID reference for the targeted ticket history.
+        limit: Constraints the maximum return size of the query array.
+
+    Returns:
+        list[TicketHistoryOut]: Serialized audit logs sorted in descending order.
+    """
     result = await db.execute(
         select(TicketHistory)
         .options(selectinload(TicketHistory.actor))

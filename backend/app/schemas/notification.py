@@ -1,12 +1,17 @@
+"""Notification routing delivery schemas.
+
+Contains validation boundaries for internal notifications and streaming Pub/Sub.
+"""
+
 import uuid
 from datetime import datetime
 from pydantic import BaseModel
 from app.models.notification import NotificationType
 
-
 from typing import Optional
 
 class NotificationOut(BaseModel):
+    """Serialized output schema representing localized backend notifications."""
     id: uuid.UUID
     user_id: uuid.UUID
     type: NotificationType
@@ -19,8 +24,10 @@ class NotificationOut(BaseModel):
 
 
 class NotificationPayload(BaseModel):
-    """
-    Schema for the real-time message sent via WebSockets/PubSub.
+    """Serialized delivery schema intended for active real-time WebSocket streams.
+
+    Encapsulates payload packets synchronized over Postgres LISTEN/NOTIFY buffers,
+    distributing counters and discrete JSON events to frontend clients.
     """
     id: uuid.UUID
     user_id: uuid.UUID

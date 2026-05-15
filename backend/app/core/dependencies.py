@@ -1,5 +1,4 @@
-"""
-FastAPI dependency injection utilities.
+"""FastAPI dependency injection utilities.
 
 Dependencies are reusable components that FastAPI resolves automatically
 when listed as function parameters. This module provides:
@@ -35,14 +34,22 @@ async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
     access_token: Annotated[str | None, Cookie()] = None,
 ) -> User:
-    """
-    Resolve the authenticated user from an incoming request.
+    """Resolves the authenticated user from an incoming request.
 
-    Checks for a JWT in this order:
-      1. Authorization: Bearer header (API clients, Swagger)
-      2. access_token cookie (Next.js browser)
+    Inspects the authorization lifecycle sequentially checking the Bearer token header
+    first, followed by the access token HttpOnly cookie fallback.
 
-    Raises HTTP 401 if no token is present, invalid, or the user doesn't exist.
+    Args:
+        db: The active asynchronous database session.
+        credentials: The HTTP Bearer credentials resolved by FastAPI.
+        access_token: The access token extracted from request cookies.
+
+    Returns:
+        User: The SQLAlchemy user model representing the active requester.
+
+    Raises:
+        HTTPException: If credentials are not present (401), the token is invalid
+            or expired (401), or the underlying user record has been deleted (401).
     """
     # Extract the token from whichever source is available
     token: str | None = None

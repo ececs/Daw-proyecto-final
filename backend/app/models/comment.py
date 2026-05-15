@@ -1,8 +1,7 @@
-"""
-Comment model.
+"""Comment database model mapping.
 
-Comments are threaded discussion attached to a ticket.
-They are displayed chronologically in the ticket detail view.
+Comments are threaded discussions attached to a ticket. They are displayed
+chronologically in the ticket detail view.
 
 Each comment has an author relationship for eager loading in the API response,
 so the frontend can display the commenter's name and avatar without extra requests.
@@ -16,6 +15,12 @@ from app.db.base import Base
 
 
 class Comment(Base):
+    """Represents a threaded discussion entry posted within a specific ticket.
+
+    Acts as a communication log chronologically grouped underneath parent incident
+    records, storing textual data and associating ownership to a specific system user.
+    """
+
     __tablename__ = "comments"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

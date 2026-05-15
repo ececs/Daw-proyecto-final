@@ -1,3 +1,6 @@
 .vercel
 
 *.tsbuildinfo
+
+*storybook.log
+storybook-static

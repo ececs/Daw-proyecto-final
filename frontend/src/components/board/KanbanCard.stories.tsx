@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from '@storybook/react';
+import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 import { DndContext } from '@dnd-kit/core';
 import { KanbanCard } from './KanbanCard';
 import { Ticket } from '@/types';

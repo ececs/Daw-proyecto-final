@@ -410,7 +410,7 @@ export function TicketDetail({ ticketId }: TicketDetailProps) {
           ? "The AI assistant will now use this document as context."
           : "The AI assistant will no longer use this document as context.",
       });
-    } catch (err) {
+    } catch {
       toast({
         title: "Failed to update RAG",
         description: "Could not update the attachment status.",

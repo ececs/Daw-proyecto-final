@@ -155,7 +155,6 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
       sort_by: filters.sort_by,
       order: filters.order,
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [filters.status, filters.priority, filters.assignee_id, filters.search, filters.page, filters.size, filters.sort_by, filters.order]
   );
 

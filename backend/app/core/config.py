@@ -32,14 +32,21 @@ class Settings(BaseSettings):
     @field_validator("SECRET_KEY")
     @classmethod
     def _require_strong_secret(cls, v: str) -> str:
-        """Refuse to boot in production with the placeholder secret.
+        """Enforces cryptographic strength requirements for the JWT secret key.
 
-        Production is detected via `RAILWAY_ENVIRONMENT_NAME` or
-        `ENV=production`. Locally the default value is allowed so
-        `docker compose up` keeps working out of the box.
+        Ensures the default key is overridden when executing in a production context
+        (e.g., deployment via Railway). This safeguard prevents accidental deployments
+        using unsecured placeholder credentials.
+
+        Args:
+            v: The configured secret key string value.
+
+        Returns:
+            str: The validated secret key.
 
         Raises:
-            ValueError: If the default placeholder is used in production.
+            ValueError: If the default placeholder secret is detected in a production
+                environment.
         """
         import os
         in_production = bool(
@@ -71,10 +78,16 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: Any) -> list[str]:
-        """Accept either a list or a comma-separated string for CORS_ORIGINS.
+        """Parses and sanitizes comma-separated CORS origin strings.
 
-        Environment variables are strings, so the deployment platform can
-        pass `"https://a.com,https://b.com"` directly.
+        Allows feeding a single string of comma-separated values from environment variables
+        directly into the list-based CORS validation layer.
+
+        Args:
+            v: Either a list of domains or a raw comma-separated string.
+
+        Returns:
+            list[str]: A list of stripped, valid origin domains.
         """
         if isinstance(v, str):
             return [i.strip() for i in v.split(",") if i.strip()]
@@ -82,7 +95,6 @@ class Settings(BaseSettings):
 
     # List of emails allowed to log in. Use ["*"] to allow anyone.
     # Supports domains: use "@domain.com" to allow everyone from that org.
-    # In production, set this to your email and "@orbidi.com".
     # We use Any here to prevent Pydantic from trying to auto-JSON-decode 
     # comma-separated strings from environment variables.
     ALLOWED_EMAILS: Any = ["*"]
@@ -90,10 +102,17 @@ class Settings(BaseSettings):
     @field_validator("ALLOWED_EMAILS", mode="before")
     @classmethod
     def parse_allowed_emails(cls, v: Any) -> list[str]:
-        """Parse `ALLOWED_EMAILS` from a list, a JSON array or a CSV string.
+        """Resolves incoming email authorization rules into a structured list.
 
-        Empty strings collapse to `["*"]` (allow everyone) so a missing
-        env var does not lock the dev environment out by accident.
+        Handles raw strings containing JSON arrays or comma-separated emails/domains,
+        facilitating integration with cloud environment variables. Defaults to wildcards
+        if empty configurations are passed.
+
+        Args:
+            v: Raw email authorization payload from system settings.
+
+        Returns:
+            list[str]: Evaluated list of authorized emails or wildcard rules.
         """
         if isinstance(v, str):
             v = v.strip()

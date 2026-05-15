@@ -70,7 +70,7 @@ services:
       # Python packages are installed system-wide in the image, not in .venv,
       # so mounting the full directory doesn't override the installed packages.
       - ./backend:/app
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "alembic upgrade head && python scripts/direct_seeder.py --only-if-empty && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   frontend:
     # Uses a node image + npm run dev so hot-reload works without rebuilding the image.

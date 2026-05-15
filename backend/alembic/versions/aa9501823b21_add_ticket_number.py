@@ -33,9 +33,9 @@ def upgrade() -> None:
         FROM numbered WHERE tickets.id = numbered.id
     """)
 
-    # Advance the sequence past the highest assigned number
+    # Advance the sequence past the highest assigned number if there are existing tickets
     op.execute(
-        "SELECT setval('ticket_number_seq', COALESCE((SELECT MAX(ticket_number) FROM tickets), 0))"
+        "SELECT setval('ticket_number_seq', COALESCE((SELECT MAX(ticket_number) FROM tickets), 1), EXISTS(SELECT 1 FROM tickets))"
     )
 
     # Set the column default to the sequence, make it NOT NULL, add unique index

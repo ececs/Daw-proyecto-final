@@ -61,3 +61,5 @@ frontend/test-results/
 # Scripts generated outputs
 revision_docx/
 
+# Track specific needed scripts
+!backend/scripts/direct_seeder.py

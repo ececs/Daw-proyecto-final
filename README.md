@@ -1,7 +1,7 @@
 # D4-Ticket AI
 
-Aplicación full-stack de ticketing colaborativo desarrollada para la prueba técnica de Orbidi.
-Repositorio creado específicamente para esta prueba.
+Aplicación full-stack de ticketing colaborativo potenciada con agentes de Inteligencia Artificial.
+Desarrollada como Proyecto Intermodular Final para el Ciclo Formativo de Grado Superior en Desarrollo de Aplicaciones Web (DAW).
 
 ## Demo en producción
 
@@ -9,19 +9,22 @@ Repositorio creado específicamente para esta prueba.
 
 Hay dos formas de acceder:
 
-- **Google OAuth** — disponible para cuentas personales Gmail y para cuentas del dominio `@orbidi.com`.
-- **Modo demo** — acceso rápido para evaluación, facilitado directamente por email al equipo de ORBIDI.
+- **Google OAuth** — disponible para cuentas personales o bajo petición. Si desea probarlo con una cuenta específica, puedo darla de alta como evaluador en la base de datos.
+- **Modo demo** — acceso rápido para evaluación ágil mediante clave de demostración.
 
-> **Nota sobre acceso:** Orbidi solicitó que en entorno local cualquier cuenta Google pueda registrarse y acceder, y así funciona (configurando `ALLOWED_EMAILS=["*"]` para acceso abierto). En la demo desplegada en producción se restringió el acceso por seguridad para evitar registros no deseados en la instancia pública. El acceso demo se ha facilitado directamente por email al equipo de ORBIDI. Si fuese necesario volver a compartirlo, puedo proporcionarlo de nuevo sin problema.
+> **Nota sobre accesos y seguridad:** En entorno local el sistema permite acceso abierto de cualquier cuenta Google configurando `ALLOWED_EMAILS=["*"]`. Sin embargo, en la demo desplegada en producción, por estrictos motivos de seguridad y para evitar accesos no autorizados o consumo malicioso de cuotas de la API de Inteligencia Artificial, los registros vía Google OAuth requieren que el correo electrónico esté explícitamente autorizado por el administrador.
 
 Incluye:
 
-- autenticación con Google OAuth 2.0
-- vista lista y vista Kanban sobre el mismo conjunto de tickets
-- comentarios, adjuntos y reasignación
-- notificaciones en tiempo real
-- asistente conversacional con IA para consultar y operar sobre tickets
-- búsqueda híbrida (semántica + keyword) con `pgvector`
+- Autenticación dual: Google OAuth 2.0 y Modo Demo de evaluación.
+- Vista de Lista interactiva y Tablero Kanban en tiempo real sincronizados.
+- Operaciones completas: comentarios, adjuntos indexables y reasignación ágil.
+- Notificaciones integradas multiusuario con sistema in-app de alertas en vivo.
+- **Asistente conversacional de IA** autónomo con orquestación ReAct mediante LangGraph.
+- **Herramientas de IA contextual por Ticket**: Diagnóstico automático exhaustivo y generador inteligente de borradores de respuesta (AI Reply).
+- **Infraestructura RAG completa**: Extracción e indexación semántica automática de sitios web (URL cliente) y documentos adjuntos (archivos PDF).
+- **Panel de Análisis Estadístico de IA**: Monitorización del rendimiento global del agente, selección dinámica del modelo del LLM, cálculo del _RAG Hit Rate_ (precisión semántica) y control presupuestario de costes en USD acumulados por caso.
+- Búsqueda híbrida avanzada (semántica + coincidencia de keywords) integrada en base de datos.
 
 ## Stack
 
@@ -107,17 +110,19 @@ Los eventos emitidos son:
 
 ## Qué está implementado
 
-- login con Google
-- modo demo para evaluadores
-- CRUD de tickets
-- filtros, ordenación y paginación
-- vista Kanban con drag & drop
-- comentarios
-- adjuntos con límite de 10 MB
-- reasignación
-- notificaciones in-app con badge de no leídas
-- sincronización multi-pestaña
-- historial de actividad del ticket
+- login con Google y control de seguridad de listas blancas
+- modo demo para evaluación rápida del tribunal
+- CRUD completo de tickets
+- filtros, ordenación y paginación dinámica
+- vista Kanban con drag & drop interactivo
+- comentarios dinámicos e historial de cambios
+- adjuntos con validación de tamaño y formato
+- reasignación instantánea con notificaciones Push in-app
+- sincronización fluida multi-pestaña mediante WebSockets
+- **Diagnóstico de IA automático** por ticket (RAG context)
+- **AI Reply** (generación de borradores formalizados mediante LLM)
+- **Procesador RAG de PDF y Sitios Web** (indexado en pgvector)
+- **Gestión y Estadísticas de IA**: Trazabilidad de costes USD y precisión semántica
 - asistente IA con creación, consulta, cambio de estado, comentario, reasignación y borrado asistido
 - diagnóstico IA específico desde el detalle del ticket
 - enriquecimiento contextual mediante URL del cliente y resumen/manual notes del operador
@@ -202,11 +207,11 @@ cp .env.example .env
 - `SECRET_KEY`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
+- `OPENAI_API_KEY`
 - `GOOGLE_API_KEY`
 
 Opcionales pero recomendables:
 
-- `OPENAI_API_KEY` para fallback del agente
 - `DEMO_ACCESS_CODE` para acceso rápido del evaluador
 - `ALLOWED_EMAILS` si se quiere restringir quién puede entrar
 
@@ -214,7 +219,7 @@ Si no quieres depender de Google OAuth durante la revisión, configura también:
 
 - `DEMO_ACCESS_CODE`
 
-Con eso, el evaluador puede entrar desde la pantalla de login usando el código demo sin necesidad de configurar Google OAuth en su entorno.
+Con eso, el evaluador se puede entrar desde la pantalla de login usando el código demo sin necesidad de configurar Google OAuth en su entorno.
 
 3. Levantar el stack (desde la raíz del proyecto):
 
@@ -237,7 +242,7 @@ El backend aplica automáticamente las migraciones de base de datos (`alembic up
 - En Docker local se usa **MinIO** como storage S3-compatible.
 - El frontend usa `NEXT_PUBLIC_API_URL=http://localhost:8000`.
 - El contenedor backend ejecuta migraciones al arrancar, incluyendo las últimas del enum de notificaciones.
-- Si cambias el esquema local, `docker-compose up` volverá a ejecutar `alembic upgrade head` de forma segura.
+- Si hay cambios en el esquema local, `docker-compose up` volverá a ejecutar `alembic upgrade head` de forma segura.
 
 #### Validación rápida tras arrancar
 
@@ -247,12 +252,20 @@ El backend aplica automáticamente las migraciones de base de datos (`alembic up
 4. Verificar que aparece en lista y Kanban
 5. Abrir [http://localhost:8000/docs](http://localhost:8000/docs) para comprobar que la API está operativa
 
-#### Datos de prueba (opcional)
+#### Datos de prueba y Auto-poblado ✨
 
-Para poblar la instancia con tickets realistas sin crearlos manualmente, hay un script en `docs_private/seed_data.py` que crea 12 tickets con distintos estados, prioridades y asignaciones. Está pensado para la demo en producción pero funciona igual en local apuntando a `http://localhost:8000/api/v1`. Requiere un token JWT válido (se obtiene de la cookie `access_token` tras iniciar sesión).
+El sistema está configurado con **poblado inteligente automático**.
+
+Al levantar los contenedores con `docker-compose up` por primera vez en un entorno limpio (como en la evaluación), el backend detectará que la base de datos está vacía y gatillará automáticamente el script `backend/scripts/direct_seeder.py` para insertar **100 tickets y 6 perfiles técnicos** con fechas de creación distribuidas en el tiempo. De esta forma, nada más arrancar, tendrás un tablero y unas métricas llenas de información profesional y realista.
+
+Si en cualquier momento se desea forzar un re-poblado limpio y purgar el estado actual, se puede lanzar manualmente desde la consola:
 
 ```bash
-TOKEN=<tu_token> python3 docs_private/seed_data.py
+# Instalar asyncpg en tu entorno local (o usar el venv del backend)
+pip install asyncpg python-dotenv
+
+# Ejecutar el script para restablecer la DB a 100 tickets
+python3 backend/scripts/direct_seeder.py
 ```
 
 ### Opción B: Ejecución manual
@@ -379,10 +392,8 @@ npm run dev
 
 Se puede entrar de dos formas:
 
-- **Google OAuth** — cualquier cuenta Google en local (sin restricciones, tal como se solicitó); en producción el acceso está más restringido para proteger la instancia pública.
-- **Modo demo** — sin necesidad de cuenta Google, usando el código `Orbidi@2026Xdesafio` en la pantalla de login. Este acceso se ha dejado de forma temporal para facilitar la evaluación.
-
-Esto evita depender obligatoriamente de una cuenta Google durante la revisión.
+- **Google OAuth** — en desarrollo local es totalmente abierto; en producción el acceso requiere alta manual en el backend por seguridad de la plataforma pública.
+- **Modo demo** — sin necesidad de cuenta Google, usando la clave compartida en la documentación. Este acceso agiliza sustancialmente la revisión por parte de los miembros del tribunal.
 
 ## Qué probar rápidamente si se levanta desde cero
 
@@ -521,13 +532,12 @@ Todas las decisiones de arquitectura, integración, permisos, validaciones y com
 
 ## Limitaciones / mejoras futuras
 
-- El asistente IA usa confirmaciones en frontend para acciones sensibles; no implementa un `interrupt/resume` persistente del grafo.
-- El identificador visible del ticket sigue derivándose del UUID; una mejora natural sería añadir un `ticket_number` secuencial.
-- La búsqueda híbrida funciona sobre tickets; una extensión futura sería indexar también documentación PDF del cliente.
+- El asistente IA usa confirmaciones en frontend para acciones sensibles; no implementa un `interrupt/resume` persistente del grafo completo.
+- El identificador visible del ticket sigue derivándose del UUID original; una mejora futura sería mapearlo a un `ticket_number` secuencial por cuenta.
 
-## Licencia
+## Licencia y Entrega
 
-Proyecto desarrollado como reto técnico para **Orbidi**.
+Proyecto académico desarrollado para la defensa final de grado de Desarrollo de Aplicaciones Web.
 
 ## Tests E2E (Playwright)
 
@@ -555,4 +565,3 @@ npm run test:e2e
 ```
 
 Nota: la configuración de Playwright arranca automáticamente el frontend con `npm run dev`, pero el backend y la infraestructura deben estar ya disponibles antes de lanzar la suite.
-

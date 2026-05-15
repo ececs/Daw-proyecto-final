@@ -10,7 +10,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { CheckCheck, Bell, Trash2 } from "lucide-react";
+import { Check, CheckCheck, Bell, Trash2 } from "lucide-react";
 import useNotificationStore from "@/stores/notificationStore";
 import { useNotifications } from "@/hooks/useNotifications";
 import { timeAgo } from "@/lib/utils";
@@ -49,6 +49,17 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
   ) => {
     e.stopPropagation();
     await handleDeleteNotification(notificationId);
+  };
+
+  // Why: a per-item "mark as read" button is the only way to clear an
+  // unread notification whose ticket has been deleted, because the
+  // navigation path early-returns when `ticket_id` is missing.
+  const handleMarkReadClick = async (
+    e: React.MouseEvent<HTMLButtonElement>,
+    notificationId: string,
+  ) => {
+    e.stopPropagation();
+    await handleMarkAsRead(notificationId);
   };
 
   return (
@@ -107,6 +118,17 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
                   <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-1.5" aria-label="Unread" />
                 )}
               </button>
+
+              {!n.read && (
+                <button
+                  onClick={(e) => handleMarkReadClick(e, n.id)}
+                  className="shrink-0 p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                  aria-label="Mark as read"
+                  title="Mark as read"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+              )}
 
               <button
                 onClick={(e) => handleDeleteClick(e, n.id)}

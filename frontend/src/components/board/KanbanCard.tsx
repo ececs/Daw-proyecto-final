@@ -1,10 +1,10 @@
 /**
- * KanbanCard — a single draggable ticket card in the Kanban view.
+ * `KanbanCard` — draggable ticket tile in the Kanban view.
  *
- * Uses dnd-kit's useDraggable hook. While dragging, the card becomes
- * semi-transparent and a drag overlay is rendered by KanbanBoard.
- *
- * Clicking the card (without dragging) navigates to the ticket detail page.
+ * Wraps `dnd-kit`'s `useDraggable`. The card fades to 40 % opacity
+ * while being dragged; the full-quality preview is rendered by
+ * `KanbanBoard` as a `DragOverlay`. Tapping (no drag in progress)
+ * navigates to the ticket detail page.
  */
 
 "use client";
@@ -25,8 +25,8 @@ interface KanbanCardProps {
 export function KanbanCard({ ticket, isUpdating = false }: KanbanCardProps) {
   const router = useRouter();
 
-  // useDraggable returns refs and transform values.
-  // We set the data payload so KanbanBoard's onDragEnd knows which ticket moved.
+  // Why: attach the full ticket on `data` so `KanbanBoard.onDragEnd`
+  // can reuse it without an extra `find` against the cached list.
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: ticket.id,
     data: { ticket },
@@ -64,7 +64,6 @@ export function KanbanCard({ ticket, isUpdating = false }: KanbanCardProps) {
           <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
         </div>
       )}
-      {/* Priority badge */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${priorityCfg.color}`}>
           {priorityCfg.label}
@@ -74,12 +73,10 @@ export function KanbanCard({ ticket, isUpdating = false }: KanbanCardProps) {
         </span>
       </div>
 
-      {/* Title */}
       <p className="text-sm font-medium text-slate-800 leading-snug mb-3 group-hover:text-blue-600 transition-colors line-clamp-2">
         {ticket.title}
       </p>
 
-      {/* Assignee */}
       {ticket.assignee && (
         <div className="flex items-center gap-1.5">
           <UserAvatar 

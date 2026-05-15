@@ -1,21 +1,22 @@
 /**
- * ChatSidebar — floating AI assistant panel.
+ * `ChatSidebar` — floating AI assistant panel docked to the right
+ * of the dashboard.
  *
- * Architecture:
- *  - Conversation history is stored in local component state (array of ChatMessage).
- *  - On each user message, the full history is sent to POST /ai/chat.
- *  - The response is an SSE stream: text tokens accumulate into the last
- *    assistant message in real time; tool_call events are appended as actions.
- *  - The panel can be toggled open/closed from the dashboard header.
+ * **Conversation state** lives in local `useState` (not Zustand): it
+ * is session-scoped and not shared across components, so introducing
+ * a global store would be unjustified ceremony.
  *
- * SSE parsing:
- *  We use the native fetch() + ReadableStream API instead of EventSource because
- *  EventSource only supports GET requests with no body. For POST + auth cookie,
- *  fetch() with a text decoder is the correct approach.
+ * **Transport** — each user message is `POST`ed to `/ai/chat` and
+ * the response is consumed as an SSE stream via the native
+ * `fetch()` + `ReadableStream` API. `EventSource` cannot carry a
+ * request body, so a text-decoder loop is used instead. Tokens are
+ * appended to the trailing assistant message in real time and
+ * `tool_call` events get pushed into the message's `actions` array.
  *
- * Why local state and not Zustand?
- *  Chat history is session-scoped and page-local. There is no need to share it
- *  across components, so local useState is simpler and more appropriate here.
+ * **Special events:** the backend emits
+ * `__DELETE_REQUESTED__:<id>:<title>` (and `__DELETE_REQUEST_OFFER__`)
+ * sentinels that the SSE router converts into UI confirmation
+ * dialogs — see the corresponding queue state below.
  */
 
 "use client";
@@ -56,9 +57,10 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
   const [deleteRequestQueue, setDeleteRequestQueue] = useState<PendingDeleteRequest[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // Thread ID logic
+  // Why: the thread id is persisted so the LangGraph checkpointer on
+  // the backend can rehydrate the conversation across reloads.
   const threadIdRef = useRef<string>("");
-  
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("ai_thread_id");
@@ -223,7 +225,7 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? { ...m, content: event.content || "Error del servidor." }
+                    ? { ...m, content: event.content || "Server error." }
                     : m
                 )
               );
@@ -283,7 +285,7 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
           m.id === assistantId
               ? {
                 ...m,
-                content: `Error: No se pudo conectar con la IA (${err instanceof Error ? err.message : "Algo salió mal"}).`,
+                content: `Error: could not connect to the AI (${err instanceof Error ? err.message : "Something went wrong"}).`,
               }
             : m
         )
@@ -435,14 +437,14 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
           <button
             onClick={resetChat}
             title="New Chat"
-            aria-label="Nueva conversación"
+            aria-label="New conversation"
             className="p-1.5 text-blue-100 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
           <button
             onClick={onClose}
-            aria-label="Cerrar chat"
+            aria-label="Close chat"
             className="p-1.5 text-blue-100 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />

@@ -1,12 +1,13 @@
 /**
- * useNotifications — fetches the initial notification list from the API and
- * syncs it to the Zustand notification store.
+ * `useNotifications` — hydrate the notification store on mount.
  *
- * The store's markAsRead / markAllAsRead actions already call the API and update
- * local state, so this hook just exposes them as named callbacks for convenience.
+ * Fetches `GET /notifications` once and feeds the result into the
+ * Zustand store. The store actions already handle the per-item PATCH
+ * / DELETE calls and the optimistic UI updates, so this hook only
+ * re-exports them with friendlier names for the consuming components.
  *
- * The real-time feed is handled separately by useWebSocket, which pushes new
- * notifications into the store as they arrive over the WS connection.
+ * Real-time updates arrive through `useWebSocket`, which writes
+ * directly into the same store.
  */
 
 "use client";
@@ -19,14 +20,12 @@ import { Notification } from "@/types";
 export function useNotifications() {
   const { setNotifications, markAsRead, markAllAsRead, removeNotification } = useNotificationStore();
 
-  // Load initial list on mount
   useEffect(() => {
     api.get<Notification[]>("/notifications").then(({ data }) => {
       setNotifications(data);
     });
   }, [setNotifications]);
 
-  // The store actions already call the API — expose them directly
   return {
     handleMarkAsRead: markAsRead,
     handleMarkAllAsRead: markAllAsRead,

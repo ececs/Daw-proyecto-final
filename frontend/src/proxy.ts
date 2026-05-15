@@ -1,17 +1,21 @@
 /**
- * Next.js proxy — route protection.
+ * Next.js edge proxy — route protection.
  *
- * In Next.js 16, the old middleware convention was renamed to proxy.
- * We keep the same auth-guard behavior while following the current API.
+ * In Next.js 16 the old `middleware.ts` convention was renamed to
+ * `proxy.ts`; the auth-guard behaviour is unchanged.
  *
- * Strategy:
- *  - Public routes (login, OAuth callback): accessible without a token.
- *  - All other routes: require the access_token cookie.
- *  - If the cookie is missing -> redirect to /login.
- *  - If on /login with a valid token -> redirect to /board.
+ * Rules:
  *
- * Note: We only check for the cookie's existence here (fast, no DB query).
- * The actual token validity is verified by FastAPI on every API call.
+ * - **Public paths** (`/login`, `/api/auth/*`, `/_next/*`) are
+ *   accessible without a token.
+ * - Every other route requires the `access_token` cookie. A missing
+ *   cookie redirects to `/login?next=<pathname>` so the original
+ *   destination is preserved.
+ * - Visiting `/login` while already authenticated redirects to
+ *   `/board` so the user is not stuck on the sign-in screen.
+ *
+ * The proxy only checks **cookie presence** — fast and DB-free.
+ * Token validity is verified by FastAPI on every API call.
  */
 
 import { NextResponse } from "next/server";

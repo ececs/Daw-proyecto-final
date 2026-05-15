@@ -1,6 +1,13 @@
+/**
+ * Toast hook — process-level, store-style implementation.
+ *
+ * Adapted from the shadcn/ui template (`useToast`). Internally
+ * implements a simple reducer + listener pattern over module-level
+ * state so any component can call `toast({...})` without going
+ * through a context provider.
+ */
 "use client"
 
-// Inspired by shadcn/ui but kept simple and clean.
 import * as React from "react"
 
 import type {

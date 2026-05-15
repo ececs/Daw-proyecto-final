@@ -1,3 +1,11 @@
+/**
+ * Toast primitives (shadcn/ui template over Radix Toast).
+ *
+ * Re-exports the Radix `Provider`/`Viewport`/`Root`/`Title`/
+ * `Description`/`Close`/`Action` with the project's Tailwind styling
+ * and an extra `success` variant. Layout shifts the viewport when
+ * the AI chat sidebar is open so toasts do not collide with it.
+ */
 "use client"
 
 import * as React from "react"

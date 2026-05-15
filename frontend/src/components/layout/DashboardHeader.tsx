@@ -1,20 +1,19 @@
-"use client";
-
 /**
- * DashboardHeader — top navigation bar for all authenticated pages.
+ * `DashboardHeader` — top navigation bar shared by every authenticated
+ * page.
  *
- * Contains:
- *  - App logo / name (links to /board)
- *  - Notification bell (real-time badge from Zustand store)
- *  - User avatar with dropdown (links to profile / logout)
+ * Hosts the app logo, the AI assistant toggle, the AI status pop-up,
+ * the notification bell with its real-time badge, and the user
+ * dropdown (profile + sign-out). Also bootstraps the WebSocket
+ * connection (`useWebSocket`) and the initial notifications fetch
+ * (`useNotifications`) so they live once at the layout level rather
+ * than in every page.
  *
- * This is a Client Component because it reads from Zustand (authStore) and
- * uses the WebSocket hook to establish the real-time connection.
- *
- * The WebSocket token is passed from the Server Component layout via a cookie
- * (the HttpOnly JWT cannot be read by JS — the token is forwarded by the
- * Next.js server to this component as a plain string prop).
+ * The JWT travels from the Server Component layout as a string prop
+ * because the `HttpOnly` cookie cannot be read by browser JS but is
+ * required by the WebSocket URL.
  */
+"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -41,25 +40,29 @@ export function DashboardHeader({ token }: DashboardHeaderProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const { isChatOpen: chatOpen, setChatOpen } = useUIStore();
 
-  // Initialise real-time connection — safe to call unconditionally (hook handles null token)
+  // Why: hook handles `null` internally, so calling unconditionally
+  // keeps the rules-of-hooks happy and only opens a socket once `token`
+  // is hydrated by the auth store.
   useWebSocket(token);
 
-  // Load the initial notification list on mount
   useNotifications();
 
   const handleLogout = async () => {
     try {
       await api.post("/auth/logout");
     } catch {
-      // Ignore errors if backend is unreachable
+      // Why: backend may be unreachable; the client-side cleanup below
+      // is enough to sign the user out of this tab.
     }
-    // Manually clear the cookie just in case (essential for the Demo flow)
+    // Why: the demo login flow does not roundtrip through the OAuth
+    // callback, so we cannot rely on the server to clear the cookie.
     document.cookie = "access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
 
     const { resetAISessionStart } = await import("@/lib/aiSession");
     resetAISessionStart();
 
-    // Redirect and force a full refresh to clear any state
+    // Why: hard reload to drop any in-memory Zustand state and force
+    // the proxy to re-evaluate route protection on the next request.
     router.push("/login");
     window.location.reload();
   };
@@ -68,15 +71,12 @@ export function DashboardHeader({ token }: DashboardHeaderProps) {
     <>
     <header className="bg-white border-b border-slate-200 px-6 py-3 sticky top-0 z-30">
       <div className="max-w-7xl mx-auto flex items-center justify-between">
-        {/* Logo */}
         <Link href="/board" className="font-bold text-slate-800 text-lg tracking-tight hover:text-blue-600 transition-colors">
           D4-Ticket{" "}
           <span className="text-blue-600">AI</span>
         </Link>
 
-        {/* Right side: notifications + user */}
         <div className="flex items-center gap-2">
-          {/* AI Chat toggle */}
           <button
             onClick={() => setChatOpen(!chatOpen)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
@@ -94,7 +94,6 @@ export function DashboardHeader({ token }: DashboardHeaderProps) {
 
           <NotificationBell />
 
-          {/* User avatar + dropdown */}
           <div className="relative">
             <button
               onClick={() => setDropdownOpen((o) => !o)}
@@ -138,7 +137,8 @@ export function DashboardHeader({ token }: DashboardHeaderProps) {
       </div>
     </header>
 
-    {/* Floating AI chat panel — rendered outside the header so it overlays page content */}
+    {/* Why: render the chat outside the header so its overlay does
+        not get clipped by the sticky `<header>` z-index stacking. */}
     {chatOpen && <ChatSidebar onClose={() => setChatOpen(false)} />}
   </>
   );

@@ -1,3 +1,9 @@
+/**
+ * Toast viewport — renders every active toast from `useToast`.
+ *
+ * Mounted once at the app shell (`app/layout.tsx`); any component
+ * can trigger a toast by calling `toast({...})` from `useToast`.
+ */
 "use client"
 
 import {

@@ -1,20 +1,19 @@
 /**
- * Dashboard layout — wraps all authenticated pages.
+ * Dashboard layout — shared chrome for every authenticated route.
  *
- * This is a Server Component. It reads the `access_token` cookie and passes
- * it as a plain string to DashboardHeader (a Client Component) so the WebSocket
- * hook can authenticate with the FastAPI WS endpoint via a query parameter.
+ * Server Component that reads the `access_token` cookie via
+ * `cookies()` and forwards it as a string prop to the client-side
+ * `DashboardHeader`. The Header needs the raw token to build the
+ * WebSocket URL because browser JS cannot read the `HttpOnly`
+ * cookie directly, and `EventSource` / `WebSocket` cannot carry
+ * custom headers.
  *
- * Why not read the cookie in the client component?
- *   The JWT is stored in an HttpOnly cookie — browser JS cannot access it.
- *   Next.js server components CAN read it via `cookies()`. We forward it as a
- *   string prop; it is used only to construct the WebSocket URL and is never
- *   rendered in the HTML, so the exposure risk is minimal and equivalent to
- *   the existing WS connection that already transmits the token in the URL.
+ * The exposure risk is contained: the token only exists in memory
+ * on the client side (never rendered in HTML) and the same value
+ * already travels over the WebSocket URL anyway.
  *
- * AuthInitializer:
- *   Calls GET /auth/me on mount and populates the Zustand authStore so all
- *   client components can access the current user without prop drilling.
+ * `AuthInitializer` is mounted once here so the Zustand auth store
+ * is hydrated for every descendant client component.
  */
 
 import { cookies } from "next/headers";
@@ -31,12 +30,8 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Hydrate the Zustand auth store on first render */}
       <AuthInitializer />
-
-      {/* Sticky header: logo + notification bell + user menu */}
       <DashboardHeader token={token} />
-
       <main className="max-w-7xl mx-auto">{children}</main>
     </div>
   );

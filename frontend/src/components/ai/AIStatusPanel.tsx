@@ -1,3 +1,14 @@
+/**
+ * `AIStatusButton` — header pop-over that surfaces the AI subsystem
+ * health and usage metrics.
+ *
+ * Reads two endpoints on open: `GET /ai/status?since=<sessionStart>`
+ * for live counters scoped to the current browser session, and
+ * `GET /ai/stats` for project-wide historical aggregates. Lets the
+ * user pick a provider override (`auto`/`openai`/`google`) that is
+ * persisted in `localStorage` and respected by the chat / diagnosis
+ * endpoints.
+ */
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -38,13 +49,14 @@ export function AIStatusButton() {
     fetchAll();
   }, []);
 
-  // Refresh on open so count is fresh
+  // Why: re-fetch on toggle so the user sees up-to-date counters
+  // even if the pop-over was previously opened long ago.
   const handleOpen = () => {
     setOpen((v) => !v);
     fetchAll();
   };
 
-  // Close on outside click
+  // Close the pop-over when the user clicks outside its bounds.
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
@@ -82,7 +94,6 @@ export function AIStatusButton() {
 
       {open && (
         <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-slate-200 z-50 overflow-hidden">
-          {/* Header */}
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">AI Status</p>
             {isHealthy && !hasError
@@ -91,7 +102,6 @@ export function AIStatusButton() {
             }
           </div>
 
-          {/* Model info */}
           <div className="px-4 py-3 space-y-2 text-xs border-b border-slate-100">
             <div className="flex items-center justify-between">
               <span className="text-slate-400">Preference</span>
@@ -120,7 +130,6 @@ export function AIStatusButton() {
             <Row label="Last surface" value={status.last_surface ?? "—"} />
           </div>
 
-          {/* Usage stats */}
           <div className="px-4 py-3 space-y-2 text-xs">
             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Session usage</p>
             <Row label="Chat messages" value={<span className="font-mono">{status.chat_count}</span>} />
@@ -156,7 +165,6 @@ export function AIStatusButton() {
             </div>
           )}
 
-          {/* Last error */}
           {hasError && (
             <div className="mx-4 mb-3 rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-xs">
               <p className="text-amber-700 font-medium flex items-center gap-1 mb-1">

@@ -1,25 +1,34 @@
 /**
  * Shared TypeScript types for the D4-Ticket AI frontend.
  *
- * These mirror the Pydantic schemas from the FastAPI backend.
- * Keeping them in one place makes it easy to update when the API changes.
+ * Mirrors the Pydantic schemas exposed by the FastAPI backend
+ * (`backend/app/schemas/`). Keeping the contract in a single module
+ * makes it explicit when the API surface changes and lets every
+ * component import a canonical shape instead of redeclaring inline
+ * types.
  */
 
 // ─── User ────────────────────────────────────────────────────────────────────
 
+/** Public-facing user profile returned by `/users/*` endpoints. */
 export interface User {
   id: string;
   email: string;
   name: string;
   avatar_url: string | null;
-  created_at: string; // ISO 8601 string from the API
+  /** ISO-8601 timestamp returned by the backend. */
+  created_at: string;
 }
 
 // ─── Ticket ──────────────────────────────────────────────────────────────────
 
+/** Workflow states the kanban columns are derived from. */
 export type TicketStatus = "open" | "in_progress" | "in_review" | "closed";
+
+/** Urgency tiers used for sorting and badge colour in the UI. */
 export type TicketPriority = "low" | "medium" | "high" | "critical";
 
+/** Ticket aggregate as returned by `GET /tickets/{ref}`. */
 export interface Ticket {
   id: string;
   ticket_number: number;
@@ -37,6 +46,7 @@ export interface Ticket {
   assignee: User | null;
 }
 
+/** Paginated response for `GET /tickets`. */
 export interface TicketListResponse {
   items: Ticket[];
   total: number;
@@ -44,6 +54,7 @@ export interface TicketListResponse {
   size: number;
 }
 
+/** Request body for `POST /tickets`. */
 export interface TicketCreate {
   title: string;
   description?: string;
@@ -53,6 +64,7 @@ export interface TicketCreate {
   client_summary?: string | null;
 }
 
+/** Request body for `PATCH /tickets/{ref}` (every field is optional). */
 export interface TicketUpdate {
   title?: string;
   description?: string;
@@ -65,6 +77,7 @@ export interface TicketUpdate {
 
 // ─── Comment ─────────────────────────────────────────────────────────────────
 
+/** Comment posted on a ticket, with its author eager-loaded by the API. */
 export interface Comment {
   id: string;
   ticket_id: string;
@@ -76,6 +89,11 @@ export interface Comment {
 
 // ─── Attachment ──────────────────────────────────────────────────────────────
 
+/**
+ * Attachment metadata. The binary itself is fetched through the
+ * presigned `download_url`; `use_for_rag` decides whether the AI
+ * pipeline indexes the file as knowledge.
+ */
 export interface Attachment {
   id: string;
   ticket_id: string;
@@ -90,6 +108,7 @@ export interface Attachment {
 
 // ─── Notification ────────────────────────────────────────────────────────────
 
+/** Reason a notification was emitted (drives the icon shown in the bell). */
 export type NotificationType =
   | "assigned"
   | "commented"
@@ -99,6 +118,7 @@ export type NotificationType =
   | "deletion_requested"
   | "rag_indexed";
 
+/** In-app notification targeted at a specific user. */
 export interface Notification {
   id: string;
   user_id: string;
@@ -111,11 +131,19 @@ export interface Notification {
 
 // ─── AI Chat ─────────────────────────────────────────────────────────────────
 
+/**
+ * Message rendered in the AI copilot sidebar.
+ *
+ * `actions` captures the agent tool calls executed during the turn
+ * (e.g. `"Changed ticket #1 status to closed"`) so the user has
+ * an audit trail; `ai_run_id` ties the message back to the persisted
+ * `AIRun` row used for feedback and metrics.
+ */
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
-  actions?: string[]; // Actions the AI performed (e.g., "Changed ticket #1 status to closed")
+  actions?: string[];
   created_at: string;
   ai_run_id?: string;
   feedback_helped?: boolean | null;
@@ -124,6 +152,7 @@ export interface ChatMessage {
 
 // ─── Ticket History ──────────────────────────────────────────────────────────
 
+/** Single audit-trail entry returned by `GET /tickets/{ref}/history`. */
 export interface TicketHistory {
   id: string;
   ticket_id: string | null;
@@ -136,6 +165,7 @@ export interface TicketHistory {
 
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
+/** Query parameters accepted by `GET /tickets`. */
 export interface TicketFilters {
   status?: TicketStatus;
   priority?: TicketPriority;
@@ -147,6 +177,7 @@ export interface TicketFilters {
   order?: "asc" | "desc";
 }
 
+/** Live AI subsystem snapshot returned by `GET /ai/status`. */
 export interface AIStatus {
   provider: string;
   model: string;
@@ -168,6 +199,7 @@ export interface AIStatus {
   last_rag_source: string;
 }
 
+/** Global AI dashboard payload returned by `GET /ai/stats`. */
 export interface AIStatsSummary {
   total_runs: number;
   runs_by_surface: Record<string, number>;
@@ -187,6 +219,7 @@ export interface AIStatsSummary {
   avg_cost_per_ticket_with_ai_usd: number;
 }
 
+/** Per-ticket AI metrics returned by `GET /ai/stats/tickets/{ref}`. */
 export interface AITicketStats {
   ticket_id: string;
   diagnosis_runs: number;
@@ -202,13 +235,16 @@ export interface AITicketStats {
   estimated_cost_usd: number;
 }
 
+/** Provider override the user can pick from the AI menu. */
 export type AIPreference = "auto" | "openai" | "google";
 
+/** Request body for `POST /tickets/{ref}/reply-draft`. */
 export interface ReplyDraftRequest {
   resolution_note: string;
   preferred_provider?: AIPreference;
 }
 
+/** Response shape for `POST /tickets/{ref}/reply-draft`. */
 export interface ReplyDraftResponse {
   draft: string;
   ai_run_id: string;

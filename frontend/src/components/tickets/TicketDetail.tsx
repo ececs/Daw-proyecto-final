@@ -1,15 +1,23 @@
 /**
- * TicketDetail — full ticket view with inline editing, comments, and attachments.
+ * `TicketDetail` — full ticket page with inline editing, comments,
+ * attachments, audit history and AI integrations.
  *
- * Sections:
- *  1. Header: title (inline edit), status selector, priority selector, back button
- *  2. Sidebar: assignee picker, metadata (author, created, updated)
- *  3. Description: inline edit with textarea
- *  4. Comments: list (newest last) + add-comment form
- *  5. Attachments: upload dropzone + file list with download/delete
+ * Layout sections (top to bottom, two-column on wide viewports):
  *
- * All edits are sent via PATCH /tickets/{id} and the local state is updated
- * immediately (optimistic) so the UI feels instant.
+ *  1. **Header** — back arrow, title (inline edit), status / priority
+ *     selectors and the destructive "delete" action.
+ *  2. **Sidebar** — assignee picker, metadata, AI per-ticket stats.
+ *  3. **Description** — inline edit with a textarea.
+ *  4. **Comments** — chronological list plus "add comment" form, and
+ *     the "AI reply draft" affordance.
+ *  5. **Attachments** — drop-zone upload, list with download / delete
+ *     and per-file RAG toggle.
+ *  6. **History** — collapsible audit trail.
+ *
+ * Mutations are sent through `PATCH /tickets/{id}` (or the matching
+ * comment / attachment endpoints) and reflected in local state
+ * immediately so the UI feels instant; the WebSocket broadcast that
+ * follows is deduplicated by id on arrival.
  */
 
 "use client";

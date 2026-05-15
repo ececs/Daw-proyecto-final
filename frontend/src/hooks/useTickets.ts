@@ -1,17 +1,21 @@
 /**
- * useTickets — data fetching hook for the tickets list.
+ * `useTickets` — paginated ticket list with optimistic mutations.
  *
- * Manages:
- *  - Fetching the paginated ticket list from the API with filters applied.
- *  - Optimistic status updates: when the user drags a card in the Kanban,
- *    the UI updates immediately while the PATCH request is in flight.
- *    If the request fails, the previous state is restored.
- *  - Loading and error states for UI feedback.
+ * Responsibilities:
  *
- * Why not React Query / SWR?
- *   For this scope, a simple useState + useEffect is sufficient and avoids
- *   adding another dependency. The pattern is easy to explain in an interview.
- *   In a larger app, React Query would add caching, background refetch, etc.
+ * - Fetch `GET /tickets` with the active filters and expose
+ *   `tickets`, `total`, `isLoading`, `error`.
+ * - Apply optimistic UI for status drags and deletes, rolling back
+ *   on API failure so the user sees an immediate response without
+ *   losing consistency.
+ * - React to the `notificationStore` refresh signal so WebSocket
+ *   events from other users (or other tabs) keep the list in sync
+ *   without polling.
+ *
+ * **Design note** — A plain `useState` + `useEffect` is used instead
+ * of React Query / SWR because the scope is small and the team
+ * wanted minimum dependencies. Caching and background refetch are
+ * implemented inline.
  */
 
 "use client";
@@ -28,10 +32,15 @@ interface UseTicketsReturn {
   total: number;
   isLoading: boolean;
   error: string | null;
+  /** Force a full network re-fetch with the current filters. */
   refetch: () => void;
+  /** Merge a ticket created in this client into the local list. */
   insertTicket: (ticket: Ticket) => void;
+  /** Optimistic status update with automatic rollback on failure. */
   updateTicketStatus: (ticketId: string, newStatus: TicketStatus) => Promise<void>;
+  /** Patch arbitrary ticket fields and refresh the local row. */
   updateTicket: (ticketId: string, data: TicketUpdate) => Promise<Ticket>;
+  /** Optimistic delete with automatic rollback on failure. */
   deleteTicket: (ticketId: string) => Promise<void>;
 }
 
@@ -40,15 +49,19 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [fetchKey, setFetchKey] = useState(0); // increment to trigger re-fetch
+  // Why: `fetchKey` is a manual cache-busting nonce; incrementing it
+  // re-runs the fetch effect without touching the filters.
+  const [fetchKey, setFetchKey] = useState(0);
   const { toast } = useToast();
 
   const refetch = useCallback(() => setFetchKey((k) => k + 1), []);
 
-  // Locally insert a ticket created from this client (e.g. via the form modal).
-  // Avoids a full reload by reusing the same merge helper as the realtime path.
-  // The WS broadcast triggered by the same POST is a no-op once the ticket is
-  // already in `tickets` (integrateCreatedTicket detects duplicates).
+  /**
+   * Merge a ticket created in this client (form modal) into the
+   * cached list without re-fetching. The WebSocket `ticket_created`
+   * fired by the same POST is a no-op because
+   * `integrateCreatedTicket` deduplicates by id.
+   */
   const insertTicket = useCallback((ticket: Ticket) => {
     setTickets((prev) => {
       if (prev.some((t) => t.id === ticket.id)) {
@@ -71,32 +84,36 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
   const deletedTicketId = useNotificationStore((s) => s.deletedTicketId);
   const lastHandledSignal = useRef(0);
 
-  // Partial update or full refetch when the refresh signal is triggered
+  // React to refresh signals from the notification store (driven by
+  // WebSocket events). Branches:
+  //  1. Deletion fast path — drop the row locally if still present.
+  //  2. Single-ticket update — fetch only the changed row and merge.
+  //  3. Fallback — full network refetch.
   useEffect(() => {
     if (refreshSignal === 0) return;
-    // Guard: skip if we already handled this signal value (e.g. re-run caused by
-    // clearing deletedTicketId after the fast-path delete, which would otherwise
-    // fall through to a full refetch unnecessarily).
+    // Why: ignore re-runs caused by clearing `deletedTicketId` after
+    // the fast path; without this guard we would issue a redundant
+    // full refetch.
     if (refreshSignal === lastHandledSignal.current) return;
     lastHandledSignal.current = refreshSignal;
 
     if (deletedTicketId) {
-      // Fast path: filter out the deleted ticket. The optimistic deleteTicket()
-      // already removed it and decremented total, so only touch tickets here to
-      // handle the case where deletion came from another user's session.
+      // Why: covers deletions originated in other sessions. The local
+      // optimistic delete already removed the row in this session, so
+      // this branch is a safety net.
       setTickets((prev) => {
         const existed = prev.some((t) => t.id === deletedTicketId);
         if (existed) setTotal((n) => Math.max(0, n - 1));
         return prev.filter((t) => t.id !== deletedTicketId);
       });
-      // Clear the deleted ID after handling it to avoid ghost deletions on
-      // subsequent re-renders. The guard above prevents the resulting re-run
-      // from triggering a spurious full refetch.
+      // Why: clear `deletedTicketId` after consuming it so the next
+      // signal does not look like a ghost deletion. The `lastHandledSignal`
+      // guard above prevents the resulting re-run from refetching.
       setTimeout(() => useNotificationStore.getState().triggerDelete(""), 0);
     } else if (lastTicketId && lastTicketId !== "None" && lastTicketId !== "undefined" && lastTicketId !== "*") {
-      // Optimized: fetch only the changed ticket and merge it into local state.
-      // For new tickets, integrateCreatedTicket sorts it into position; it only
-      // requests a full refetch when filters/pagination make local insertion unsafe.
+      // Why: targeted refresh — pull just the affected ticket and let
+      // `integrateCreatedTicket` decide whether the local merge is
+      // sufficient or a full refetch is needed.
       api.get<Ticket>(`/tickets/${lastTicketId}`)
         .then(({ data }) => {
           setTickets((prev) => {
@@ -120,14 +137,13 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
           refetch();
         });
     } else {
-      // Fallback: Full refresh for general events
       refetch();
     }
   }, [refreshSignal, lastTicketId, deletedTicketId, filters, refetch]);
 
-  // Stable serialized key — only changes when a filter value actually changes.
-  // Using explicit primitive dependencies avoids re-fetching when the filters
-  // object reference changes but the values stay the same (e.g. parent re-renders).
+  // Why: depend on the primitive values, not the `filters` object
+  // reference, so parent re-renders that produce a new object
+  // identity but the same values do not trigger a network re-fetch.
   const filtersKey = useMemo(
     () => JSON.stringify({
       status: filters.status,
@@ -148,7 +164,8 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
     setIsLoading(true);
     setError(null);
 
-    // Build query params from filters, omitting undefined/null values
+    // Why: drop `undefined` / `null` / `""` from the query string so
+    // the backend does not have to filter them out.
     const params = Object.fromEntries(
       Object.entries(filters).filter(([, v]) => v !== undefined && v !== null && v !== "")
     );
@@ -172,11 +189,11 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
   }, [fetchKey, filtersKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
-   * Optimistically update a ticket's status in the local list, then PATCH the API.
-   * If the API call fails, the original status is restored.
+   * Optimistically update a ticket's status, then PATCH the API.
+   * Restores the previous status and shows a destructive toast on
+   * failure.
    */
   const updateTicketStatus = useCallback(async (ticketId: string, newStatus: TicketStatus) => {
-    // Optimistic update: change the status in the local state immediately
     const previous = tickets.find((t) => t.id === ticketId);
     setTickets((prev) =>
       prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus } : t))
@@ -185,7 +202,6 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
     try {
       await api.patch(`/tickets/${ticketId}`, { status: newStatus });
     } catch {
-      // Rollback on failure
       if (previous) {
         setTickets((prev) =>
           prev.map((t) => (t.id === ticketId ? { ...t, status: previous.status } : t))
@@ -199,9 +215,7 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
     }
   }, [tickets, toast]);
 
-  /**
-   * Update any ticket fields and refresh the local list.
-   */
+  /** Patch arbitrary ticket fields and refresh the matching row in place. */
   const updateTicket = useCallback(async (ticketId: string, data: TicketUpdate): Promise<Ticket> => {
     const { data: updated } = await api.patch<Ticket>(`/tickets/${ticketId}`, data);
     setTickets((prev) =>
@@ -211,8 +225,9 @@ export function useTickets(filters: TicketFilters = {}): UseTicketsReturn {
   }, []);
 
   /**
-   * Optimistically remove the ticket from the local list, then call the API.
-   * If the API call fails, the previous list is restored (rollback).
+   * Optimistic delete with rollback. Re-throws on 403 so the caller
+   * can decide whether to surface "not the author" through a
+   * tailored UI flow instead of the generic destructive toast.
    */
   const deleteTicket = useCallback(async (ticketId: string) => {
     const snapshot = tickets;

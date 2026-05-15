@@ -1,3 +1,11 @@
+/**
+ * Generic confirmation dialog with a destructive primary button.
+ *
+ * Wraps Radix's `Dialog` so callers only pass the title, description
+ * and the two callbacks; visual chrome (warning icon, red CTA, blur
+ * overlay) is fixed because every consumer uses it for the same
+ * "irreversible action" pattern.
+ */
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";

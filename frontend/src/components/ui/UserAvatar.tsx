@@ -1,11 +1,11 @@
 /**
- * UserAvatar — robust user profile picture component.
- * 
- * Features:
- *  1. Image loading: uses the provided `src` (e.g. Google or DiceBear URL).
- *  2. Error handling: if the image fails to load (404, blocked, etc.), 
- *     it automatically falls back to a stylish initials-based avatar.
- *  3. Fallback: also falls back to initials if `src` is null or empty.
+ * `UserAvatar` — profile picture with a graceful initials fallback.
+ *
+ * Renders the supplied `src` (Google avatar, DiceBear, …) and falls
+ * back to a coloured circle with the user's first initial when:
+ *
+ * - `src` is `null` / empty (no avatar URL on the user record), or
+ * - the image fails to load (404, blocked, CORS, ad-blocker).
  */
 
 "use client";
@@ -29,8 +29,9 @@ const SIZE_MAP = {
 export function UserAvatar({ src, name, size = "sm", className = "" }: UserAvatarProps) {
   const [hasError, setHasError] = useState(false);
   const initials = name ? name.charAt(0).toUpperCase() : "?";
-  
-  // Reset error state if src changes
+
+  // Why: a new `src` deserves a fresh attempt; without this, an avatar
+  // that failed once would stay broken even after the user updates it.
   useEffect(() => {
     setHasError(false);
   }, [src]);
@@ -39,7 +40,7 @@ export function UserAvatar({ src, name, size = "sm", className = "" }: UserAvata
 
   if (!src || hasError) {
     return (
-      <div 
+      <div
         className={`${sizeClass} rounded-full bg-slate-100 flex items-center justify-center font-semibold text-slate-500 border border-slate-200 shrink-0 ${className}`}
         title={name}
       >

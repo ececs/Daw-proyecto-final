@@ -1,13 +1,22 @@
 /**
- * Notification state store — Zustand.
+ * Notification store (Zustand).
  *
- * Manages the list of notifications and the unread badge count.
- * Notifications arrive via two channels:
- *  1. Initial load: from GET /notifications on first WebSocket connect.
- *  2. Real-time: pushed via WebSocket as events happen.
+ * Owns the in-memory notification list plus the unread badge count.
+ * Notifications enter the store from two sources:
  *
- * The `unreadCount` is derived from the notifications array (not stored separately)
- * to avoid state synchronization bugs.
+ *  1. **Initial fetch** — `GET /notifications` on first WebSocket
+ *     connect, hydrated via `setNotifications`.
+ *  2. **Real-time push** — WebSocket events handled by `useWebSocket`,
+ *     which call `addNotification` / `syncRemoveNotification` /
+ *     `syncMarkOneRead` / `syncMarkAllAsRead`.
+ *
+ * Whenever the server sends an authoritative `unread_count` we trust
+ * it over the client-side derivation; otherwise the count is
+ * recomputed from the list to avoid drift.
+ *
+ * The `refreshSignal` / `lastTicketId` / `deletedTicketId` fields are
+ * a lightweight pub-sub used by `useTickets` to know when to re-fetch
+ * after a WebSocket event without coupling the two stores directly.
  */
 
 import { create } from "zustand";
@@ -49,14 +58,15 @@ const useNotificationStore = create<NotificationState>((set) => ({
 
   triggerDelete: (ticketId) =>
     set((state) => ({
-      // If we are clearing the ID, don't necessarily need to bump signal, 
-      // but if we do, useTickets logic already handles it.
+      // Why: bump the signal only when an id is supplied; consumers
+      // (`useTickets`) already react to `deletedTicketId` alone.
       refreshSignal: ticketId ? state.refreshSignal + 1 : state.refreshSignal,
       deletedTicketId: ticketId || null,
       lastTicketId: null
     })),
 
-  // Sync badge count directly from the server-authoritative value
+  // Why: prefer the server's authoritative unread_count whenever it is
+  // pushed; client-side derivation is the fallback.
   syncUnreadCount: (count) => set({ unreadCount: count }),
 
   syncMarkAllAsRead: (serverUnreadCount) =>
@@ -79,11 +89,12 @@ const useNotificationStore = create<NotificationState>((set) => ({
     }),
 
   setNotifications: (notifications) => {
-    // Use a Map to ensure absolute uniqueness by ID
+    // Why: server pages can occasionally re-send a notification; dedupe
+    // by id with a Map so the bell badge does not double-count.
     const uniqueMap = new Map();
     notifications.forEach((n) => uniqueMap.set(n.id, n));
     const unique = Array.from(uniqueMap.values());
-    
+
     set({
       notifications: unique,
       unreadCount: unique.filter((n) => !n.read).length,
@@ -93,7 +104,8 @@ const useNotificationStore = create<NotificationState>((set) => ({
   addNotification: (notification, serverUnreadCount) => {
     set((state) => {
       if (state.notifications.some((n) => n.id === notification.id)) {
-        // Even on a duplicate, trust the server's authoritative count if provided
+        // Why: duplicate WebSocket push — keep the list intact but
+        // still honour the server's count if provided.
         if (typeof serverUnreadCount === "number") {
           return { ...state, unreadCount: serverUnreadCount };
         }
@@ -113,7 +125,8 @@ const useNotificationStore = create<NotificationState>((set) => ({
     try {
       await api.delete(`/notifications/${id}`);
     } catch {
-      // Optimistic removal remains applied for UX consistency across tabs.
+      // Why: optimistic removal — keep the local state consistent
+      // across tabs even if the DELETE failed.
     }
     set((state) => {
       const updated = state.notifications.filter((n) => n.id !== id);
@@ -142,7 +155,8 @@ const useNotificationStore = create<NotificationState>((set) => ({
     try {
       await api.patch(`/notifications/${id}/read`);
     } catch {
-      // Optimistic update — don't revert on failure for UX simplicity
+      // Why: optimistic — UI keeps the read state even if the PATCH
+      // failed, the next /notifications fetch will reconcile.
     }
     set((state) => {
       const updated = state.notifications.map((n) =>
@@ -159,7 +173,7 @@ const useNotificationStore = create<NotificationState>((set) => ({
     try {
       await api.patch("/notifications/read-all");
     } catch {
-      // Optimistic update
+      // Why: optimistic, same rationale as `markAsRead`.
     }
     set((state) => ({
       notifications: state.notifications.map((n) => ({ ...n, read: true })),

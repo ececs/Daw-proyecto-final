@@ -1,14 +1,20 @@
 /**
- * TicketTable — paginated, filterable, sortable ticket list.
+ * `TicketTable` — paginated, filterable and sortable list view.
  *
  * Columns: title, status, priority, assignee, created_at, actions.
  *
- * Filtering is done server-side: each filter change updates the `filters` state
- * passed to `useTickets`, which re-fetches from the API. This keeps the dataset
- * small even when there are thousands of tickets.
+ * Filtering and sorting are **server-side**: every change pushes new
+ * `filters` up to the parent, which propagates them to `useTickets`
+ * and triggers a re-fetch. This keeps the payload small even with
+ * thousands of tickets and lets the backend apply the sort_by
+ * allow-list to defend against SQL-injection-via-column-name.
  *
- * Sorting: clicking a column header updates the `sort_by`/`order` query params
- * sent to the API (allowed columns are validated server-side).
+ * Local responsibilities of the component:
+ *
+ * - Debounce the search input (350 ms) so each keystroke does not
+ *   fire a network call.
+ * - Drive the destructive-action UX (`ConfirmDialog`) and the
+ *   "request deletion" fallback for non-author 403 responses.
  */
 
 "use client";
@@ -64,11 +70,12 @@ export function TicketTable({
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingDeleteRequest, setPendingDeleteRequest] = useState<{ id: string; title: string } | null>(null);
 
-  // Local state for the search input — debounced 350ms before propagating to
-  // the parent filter so each keystroke doesn't fire a network request.
+  // Why: local mirror of the search box; debounced before pushing
+  // the value up so we don't fire a request on every keystroke.
   const [searchInput, setSearchInput] = useState(filters.search ?? "");
 
-  // Keep local input in sync when the parent clears filters externally.
+  // Why: re-sync when the parent clears filters externally (e.g. a
+  // "Reset" button) so the input does not get stuck on the old value.
   useEffect(() => {
     setSearchInput(filters.search ?? "");
   }, [filters.search]);
@@ -162,21 +169,18 @@ export function TicketTable({
 
   return (
     <div className="space-y-4">
-      {/* Filters row */}
       <div className="flex flex-wrap gap-3 items-center">
-        {/* Search */}
         <input
           type="text"
-          aria-label="Buscar tickets"
+          aria-label="Search tickets"
           placeholder="Search tickets..."
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-52"
         />
 
-        {/* Status filter */}
         <select
-          aria-label="Filtrar por estado"
+          aria-label="Filter by status"
           value={filters.status ?? ""}
           onChange={(e) =>
             onFiltersChange({ ...filters, status: (e.target.value as TicketStatus) || undefined, page: 1 })
@@ -189,9 +193,8 @@ export function TicketTable({
           ))}
         </select>
 
-        {/* Priority filter */}
         <select
-          aria-label="Filtrar por prioridad"
+          aria-label="Filter by priority"
           value={filters.priority ?? ""}
           onChange={(e) =>
             onFiltersChange({ ...filters, priority: (e.target.value as TicketPriority) || undefined, page: 1 })
@@ -204,10 +207,9 @@ export function TicketTable({
           ))}
         </select>
 
-        {/* Assignee filter */}
         {users.length > 0 && (
           <select
-            aria-label="Filtrar por asignado"
+            aria-label="Filter by assignee"
             value={filters.assignee_id ?? ""}
             onChange={(e) =>
               onFiltersChange({ ...filters, assignee_id: e.target.value || undefined, page: 1 })
@@ -232,7 +234,6 @@ export function TicketTable({
         )}
       </div>
 
-      {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
         <table className="min-w-[980px] w-full text-sm">
@@ -241,7 +242,7 @@ export function TicketTable({
               <th className="px-4 py-3 w-10 min-w-10">
                 <button
                   onClick={handleSelectAll}
-                  aria-label={selectedTicketIds.length === tickets.length && tickets.length > 0 ? "Deseleccionar todos" : "Seleccionar todos"}
+                  aria-label={selectedTicketIds.length === tickets.length && tickets.length > 0 ? "Deselect all" : "Select all"}
                   className="text-slate-400 hover:text-blue-600 transition-colors"
                 >
                   {selectedTicketIds.length === tickets.length && tickets.length > 0 
@@ -326,11 +327,10 @@ export function TicketTable({
                     selectedTicketIds.includes(ticket.id) ? "bg-blue-50/50" : ""
                   }`}
                 >
-                  {/* Selection Checkbox */}
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => toggleTicket(ticket.id)}
-                      aria-label={selectedTicketIds.includes(ticket.id) ? "Deseleccionar ticket" : "Seleccionar ticket"}
+                      aria-label={selectedTicketIds.includes(ticket.id) ? "Deselect ticket" : "Select ticket"}
                       className={`${
                         selectedTicketIds.includes(ticket.id)
                           ? "text-blue-600"
@@ -343,11 +343,9 @@ export function TicketTable({
                       }
                     </button>
                   </td>
-                  {/* Ticket ref */}
                   <td className="px-4 py-3 whitespace-nowrap text-xs font-mono text-slate-400">
                     #{ticket.ticket_number}
                   </td>
-                  {/* Title */}
                   <td className="px-4 py-3">
                     <span
                       title={ticket.title}
@@ -357,21 +355,18 @@ export function TicketTable({
                     </span>
                   </td>
 
-                  {/* Status */}
                   <td className="px-4 py-3">
                     <Badge variant={ticket.status as "open" | "in_progress" | "in_review" | "closed"}>
                       {STATUS_LABELS[ticket.status]}
                     </Badge>
                   </td>
 
-                  {/* Priority */}
                   <td className="px-4 py-3">
                     <Badge variant={ticket.priority as "low" | "medium" | "high" | "critical"}>
                       {PRIORITY_CONFIG[ticket.priority].label}
                     </Badge>
                   </td>
 
-                  {/* Assignee */}
                   <td className="px-4 py-3">
                      {ticket.assignee ? (
                       <div className="flex items-center gap-2">
@@ -387,13 +382,11 @@ export function TicketTable({
                     )}
                   </td>
 
-                  {/* Created at */}
                   <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
                     <span>{formatDateTime(ticket.created_at)}</span>
                     <span className="block text-xs text-slate-400">{timeAgo(ticket.created_at)}</span>
                   </td>
 
-                  {/* Actions */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -421,7 +414,6 @@ export function TicketTable({
         </div>
       </div>
 
-      {/* Pagination */}
       {total > (filters.size ?? 20) && (
         <div className="flex items-center justify-center gap-2">
           <button

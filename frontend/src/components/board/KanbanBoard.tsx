@@ -1,22 +1,26 @@
 /**
- * KanbanBoard — drag-and-drop ticket board using dnd-kit.
+ * `KanbanBoard` — drag-and-drop ticket board powered by `dnd-kit`.
  *
- * Architecture:
- *   DndContext                  — provides drag state to all descendants
- *     KanbanColumn (× 4)       — useDroppable targets, one per status
- *       KanbanCard (× n)       — useDraggable items
- *     DragOverlay               — renders a ghost card while dragging
+ * Layout:
+ *
+ * ```
+ *   <DndContext>                  // drag state for all descendants
+ *     <KanbanColumn /> × 4        // useDroppable, one per status
+ *       <KanbanCard />  × n       // useDraggable
+ *     <DragOverlay />             // floating preview while dragging
+ *   </DndContext>
+ * ```
  *
  * Drag lifecycle:
- *   1. User picks up a card (dragStart) → active ticket stored in state.
- *   2. DragOverlay renders a visual copy of the card at the cursor.
- *   3. User drops over a column (dragEnd) → if the column is a different status,
- *      `updateTicketStatus` is called (which optimistically updates the UI and
- *      PATCHes the API in the background).
  *
- * Sensors:
- *   MouseSensor with a 5px activation distance prevents accidental drags when
- *   the user just wants to click a card. TouchSensor does the same for mobile.
+ *  1. `onDragStart` stores the active ticket so the overlay can
+ *     render a faithful copy at the cursor.
+ *  2. `onDragEnd` reads the drop target id (matches `TicketStatus`),
+ *     ignores no-op drops, and delegates to `onStatusChange` which
+ *     in turn applies the optimistic update + PATCH.
+ *
+ * **Sensors:** a 5 px activation distance for the mouse and a 250 ms
+ * delay for touch prevent accidental drags during a normal tap.
  */
 
 "use client";
@@ -49,7 +53,8 @@ export function KanbanBoard({ tickets, onStatusChange }: KanbanBoardProps) {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // Require 5px of movement before a drag starts — prevents accidental drags on click
+  // Why: 5 px distance / 250 ms touch delay so taps are not
+  // misinterpreted as drag starts on the card body.
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } })
@@ -76,8 +81,8 @@ export function KanbanBoard({ tickets, onStatusChange }: KanbanBoardProps) {
       await onStatusChange(ticketId, newStatus);
     } catch {
       toast({
-        title: "Error al cambiar estado",
-        description: "No se pudo mover el ticket. Inténtalo de nuevo.",
+        title: "Status change failed",
+        description: "Could not move the ticket. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -85,7 +90,8 @@ export function KanbanBoard({ tickets, onStatusChange }: KanbanBoardProps) {
     }
   };
 
-  // Group tickets by status for each column
+  // Why: pre-group by status so each column receives a stable slice
+  // and React can keep its key-based reconciliation cheap.
   const ticketsByStatus = STATUSES.reduce<Record<TicketStatus, Ticket[]>>(
     (acc, status) => {
       acc[status] = tickets.filter((t) => t.status === status);
@@ -104,8 +110,8 @@ export function KanbanBoard({ tickets, onStatusChange }: KanbanBoardProps) {
         ))}
       </div>
 
-      {/* DragOverlay renders a floating copy of the card at the cursor position.
-          It lives outside the column DOM so it doesn't affect layout. */}
+      {/* Why: `DragOverlay` floats above the column DOM so the moving
+          card never gets clipped by overflow on its origin column. */}
       <DragOverlay>
         {activeTicket && (
           <div className="rotate-1 shadow-xl">

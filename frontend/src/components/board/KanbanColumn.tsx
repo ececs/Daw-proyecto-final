@@ -14,7 +14,7 @@ import { Ticket, TicketStatus } from "@/types";
 import { KanbanCard } from "./KanbanCard";
 import { STATUS_LABELS } from "@/lib/utils";
 
-// Column header colors keyed by status
+/** Header dot colour for each status column. */
 const COLUMN_COLORS: Record<TicketStatus, string> = {
   open: "bg-blue-500",
   in_progress: "bg-amber-500",
@@ -29,13 +29,12 @@ interface KanbanColumnProps {
 }
 
 export function KanbanColumn({ status, tickets, updatingId }: KanbanColumnProps) {
-  // useDroppable: this column acts as a drop target.
-  // The id must match the status value so onDragEnd can identify the target column.
+  // Why: the droppable id must equal the `TicketStatus` literal so
+  // `onDragEnd` can extract the target status without a side table.
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
   return (
     <div className="flex flex-col min-w-0 flex-1">
-      {/* Column header */}
       <div className="flex items-center gap-2 mb-3">
         <span className={`w-2.5 h-2.5 rounded-full ${COLUMN_COLORS[status]}`} />
         <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
@@ -46,7 +45,6 @@ export function KanbanColumn({ status, tickets, updatingId }: KanbanColumnProps)
         </span>
       </div>
 
-      {/* Drop zone — highlighted when a card is dragged over */}
       <div
         ref={setNodeRef}
         className={`flex flex-col gap-2 flex-1 min-h-[120px] rounded-xl p-2 transition-colors ${

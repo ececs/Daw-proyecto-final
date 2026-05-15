@@ -1,17 +1,18 @@
-"use client";
-
 /**
  * Login page.
  *
- * Converted to Client Component to support Demo Access Code interaction.
+ * Two authentication paths are offered:
  *
- * The "Sign in with Google" button is an anchor tag pointing to the backend's
- * /auth/google endpoint. Clicking it redirects the browser to Google's consent
- * screen.
+ * - **Google OAuth** — an anchor pointing to the backend
+ *   `/auth/google`, which kicks off the standard three-legged flow.
+ * - **Demo code** — a small form that posts the shared secret to
+ *   `/auth/demo-login` and, on success, hops through the local
+ *   callback route to set the cookie before reaching `/board`.
  *
- * The Demo Access Code input allows evaluators to bypass Google login by 
- * providing a pre-configured secret code.
+ * Declared as a Client Component because the demo form needs
+ * `useState` for input + error feedback.
  */
+"use client";
 
 import { useState } from "react";
 import { Ticket, KeyRound, Loader2 } from "lucide-react";
@@ -67,7 +68,7 @@ export default function LoginPage() {
         {/* Google OAuth button */}
         <a
           href={`${API_URL}/api/v1/auth/google`}
-          aria-label="Iniciar sesión con Google"
+          aria-label="Sign in with Google"
           className="flex items-center justify-center gap-3 w-full py-3 px-6 border border-slate-200 rounded-lg text-slate-700 font-medium hover:bg-slate-50 transition-colors mb-6"
         >
           {/* Google SVG logo */}
@@ -107,7 +108,7 @@ export default function LoginPage() {
             <input
               type="text"
               id="demo-code"
-              aria-label="Código de acceso demo"
+              aria-label="Demo access code"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="Enter Access Code"

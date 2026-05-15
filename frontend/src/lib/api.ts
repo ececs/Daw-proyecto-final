@@ -1,13 +1,16 @@
 /**
- * API client — axios instance configured for the FastAPI backend.
+ * Axios instance pre-configured for the FastAPI backend.
  *
- * Cross-domain auth strategy:
- *  - The JWT is stored as a readable (non-httpOnly) cookie on the Vercel domain.
- *  - The Next.js proxy reads it server-side for route protection.
- *  - The request interceptor below reads it client-side and attaches it as an
- *    Authorization: Bearer header so the Railway backend (different domain) can
- *    authenticate each request. Browsers don't share cookies across domains, so
- *    withCredentials alone is not sufficient here.
+ * Cross-domain authentication strategy:
+ *
+ * - The JWT is stored as a readable (non-`HttpOnly`) cookie on the
+ *   Vercel domain so the browser can attach it to API calls.
+ * - The Next.js edge proxy reads the same cookie server-side for
+ *   route protection.
+ * - The request interceptor below pulls the token client-side and
+ *   sends it as `Authorization: Bearer` to the Railway backend
+ *   (different origin). `withCredentials` alone is not enough because
+ *   browsers do not share cookies across origins.
  */
 
 import axios from "axios";
@@ -16,21 +19,20 @@ import { getAuthToken } from "./auth";
 const api = axios.create({
   baseURL: `${process.env.NEXT_PUBLIC_API_URL}/api/v1`,
   withCredentials: true,
-  // A slightly higher timeout prevents false negatives during local E2E runs,
-  // where concurrent WebSocket activity and dev-mode reload overhead can make
-  // otherwise healthy requests exceed 10 seconds.
+  // Why: a 20s timeout absorbs the overhead of dev-mode reloads and
+  // concurrent WebSocket activity during local E2E runs without
+  // surfacing false-negative timeouts to the user.
   timeout: 20000,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Request interceptor: read the JWT from the frontend-domain cookie and attach
-// it as Authorization: Bearer on every outbound API request to the backend.
+// Why: attach the Bearer header on every request from the JWT
+// readable cookie, since cross-origin cookies are not auto-forwarded.
 api.interceptors.request.use((config) => {
   const token = getAuthToken();
   if (token) {
-    // Direct assignment is safer for cross-version compatibility
     if (config.headers) {
       config.headers["Authorization"] = `Bearer ${token}`;
     }
@@ -38,10 +40,10 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor: on 401, redirect to /api/auth/clear which deletes the
-// session cookie server-side (JS cannot delete httpOnly cookies) before sending
-// the user to /login. This breaks the proxy redirect loop caused by stale
-// httpOnly cookies.
+// Why: when the backend returns 401 we route through `/api/auth/clear`
+// to drop the HttpOnly session cookie (JS cannot delete it directly),
+// breaking the proxy redirect loop a stale cookie would otherwise
+// cause before sending the user back to `/login`.
 api.interceptors.response.use(
   (response) => response,
   (error) => {

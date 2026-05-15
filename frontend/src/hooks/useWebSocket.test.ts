@@ -103,7 +103,7 @@ describe("useWebSocket", () => {
     expect(storeActions.syncMarkOneRead).toHaveBeenCalledWith("n-1", 3);
     expect(storeActions.syncMarkAllAsRead).toHaveBeenCalledWith(0);
     expect(storeActions.syncRemoveNotification).toHaveBeenCalledWith("n-1", 0);
-    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Nueva Notificación" }));
+    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: "New notification" }));
   });
 
   it("syncs initial unread count without showing a toast for the handshake", () => {
@@ -115,7 +115,7 @@ describe("useWebSocket", () => {
         data: JSON.stringify({
           type: "system_alert",
           data: { unread_count: 5 },
-          message: "Estado inicial cargado",
+          message: "Initial state loaded",
         }),
       } as MessageEvent<string>);
     });
@@ -246,7 +246,7 @@ describe("useWebSocket", () => {
 
     expect(storeActions.syncUnreadCount).toHaveBeenCalledWith(2);
     expect(toastMock).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Aviso del Sistema" }),
+      expect.objectContaining({ title: "System notice" }),
     );
   });
 

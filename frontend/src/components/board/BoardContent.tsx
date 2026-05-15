@@ -1,16 +1,12 @@
 /**
- * BoardContent — the main client component for the board page.
+ * `BoardContent` — client shell for the board page.
  *
- * Responsibilities:
- *  1. Toggle between list (TicketTable) and kanban (KanbanBoard) views.
- *  2. Hold the filter state shared between both views.
- *  3. Show the "New Ticket" button and open the TicketForm dialog.
- *  4. Connect useTickets (data fetching) to both views.
+ * Owns the view toggle (`list` ↔ `kanban`), the shared filter state,
+ * the "New ticket" dialog and wires the data hook (`useTickets`) to
+ * both rendering modes.
  *
- * This is a Client Component ("use client") because it needs:
- *  - useState for view toggle and filter state
- *  - dnd-kit sensors (non-serializable, cannot be passed from Server Components)
- *  - The dialog for creating new tickets
+ * Declared as a Client Component because it relies on `useState`,
+ * `dnd-kit` sensors (non-serialisable) and an imperative dialog.
  */
 
 "use client";
@@ -36,14 +32,14 @@ export function BoardContent() {
   const { users } = useUsers();
 
   const handleCreateSuccess = (ticket: Ticket) => {
-    // Merge the new row locally. The WS broadcast triggered by the same POST
-    // will be deduped by insertTicket, so no full reload is needed.
+    // Why: the new row is merged locally; the WebSocket broadcast
+    // produced by the same POST is deduped by `insertTicket`, so a
+    // full reload is avoided.
     insertTicket(ticket);
   };
 
   return (
     <div className="px-3 py-4 sm:p-6">
-      {/* Page header */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Tickets</h1>
@@ -52,9 +48,7 @@ export function BoardContent() {
           </p>
         </div>
 
-        {/* Controls: view toggle + new ticket */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          {/* Page size selector */}
           <select
             aria-label="Tickets per page"
             value={filters.size ?? 20}
@@ -68,7 +62,6 @@ export function BoardContent() {
             ))}
           </select>
 
-          {/* List / Kanban toggle */}
           <div className="flex items-center rounded-lg bg-slate-100 p-1 gap-0.5">
             <button
               onClick={() => setView("list")}
@@ -94,7 +87,6 @@ export function BoardContent() {
             </button>
           </div>
 
-          {/* New ticket button */}
           <button
             onClick={() => setShowForm(true)}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 active:bg-blue-800 sm:w-auto"
@@ -105,7 +97,6 @@ export function BoardContent() {
         </div>
       </div>
 
-      {/* Content area */}
       {view === "list" ? (
         <TicketTable
           tickets={tickets}
@@ -152,7 +143,6 @@ export function BoardContent() {
         </>
       )}
 
-      {/* Create ticket dialog */}
       <TicketForm
         open={showForm}
         onClose={() => setShowForm(false)}

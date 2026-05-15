@@ -1,25 +1,29 @@
-/**
- * Generic confirmation dialog with a destructive primary button.
- *
- * Wraps Radix's `Dialog` so callers only pass the title, description
- * and the two callbacks; visual chrome (warning icon, red CTA, blur
- * overlay) is fixed because every consumer uses it for the same
- * "irreversible action" pattern.
- */
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { AlertTriangle } from "lucide-react";
 
 interface ConfirmDialogProps {
+  /** Controls visibility state of the confirmation modal portal. */
   open: boolean;
+  /** Descriptive heading summarizing the action (e.g., "Delete Ticket"). */
   title: string;
+  /** Supporting message body context explaining consequences (e.g., "This action cannot be undone"). */
   description: string;
+  /** Optional text label for the destructive submission button. Defaults to "Delete". */
   confirmLabel?: string;
+  /** Click callback for proceeding with the destructive primary action. */
   onConfirm: () => void;
+  /** Click callback for aborting the flow and dismissing the portal wrapper. */
   onCancel: () => void;
 }
 
+/**
+ * Generic confirmation dialog with a destructive primary button.
+ *
+ * Wraps Radix's `Dialog` so callers only pass the title, description
+ * and callbacks; visual chrome is fixed to enforce safety patterns.
+ */
 export function ConfirmDialog({
   open,
   title,

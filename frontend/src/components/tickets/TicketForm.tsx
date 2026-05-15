@@ -1,15 +1,3 @@
-/**
- * `TicketForm` — modal dialog for creating and editing tickets.
- *
- * Built on Radix Dialog + react-hook-form + Zod. Acts in two modes:
- *
- * - **Create** (no `ticket` prop) — submits `POST /tickets`.
- * - **Edit**  (with `ticket` prop) — submits `PATCH /tickets/{id}`.
- *
- * `onSuccess` is invoked with the freshly persisted ticket so the
- * parent can merge it into its cached list (see `useTickets.insertTicket`).
- */
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -40,14 +28,25 @@ const PRIORITIES: { value: TicketPriority; label: string }[] = [
 ];
 
 interface TicketFormProps {
+  /** Toggles visibility status of the ticket creation/edit overlay modal. */
   open: boolean;
+  /** Dismiss callback fired when close operations are requested by the operator. */
   onClose: () => void;
+  /** Callback invoked with the persisted server Ticket payload upon successful completion. */
   onSuccess: (ticket: Ticket) => void;
-  /** When supplied, the form switches from create to edit mode. */
+  /** When provided, populates input fields and toggles the context to UPDATE mode. */
   ticket?: Ticket;
+  /** Complete dictionary of technical specialists eligible for assignment dropdown. */
   users: User[];
 }
 
+/**
+ * `TicketForm` — modal dialog for creating and editing tickets.
+ *
+ * Built on Radix Dialog + react-hook-form + Zod. Acts in two modes:
+ * - **Create** (no `ticket` prop) — submits `POST /tickets`.
+ * - **Edit**  (with `ticket` prop) — submits `PATCH /tickets/{id}`.
+ */
 export function TicketForm({ open, onClose, onSuccess, ticket, users }: TicketFormProps) {
   const isEdit = !!ticket;
   const [showPreview, setShowPreview] = useState(false);

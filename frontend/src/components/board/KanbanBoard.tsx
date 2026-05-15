@@ -1,28 +1,3 @@
-/**
- * `KanbanBoard` — drag-and-drop ticket board powered by `dnd-kit`.
- *
- * Layout:
- *
- * ```
- *   <DndContext>                  // drag state for all descendants
- *     <KanbanColumn /> × 4        // useDroppable, one per status
- *       <KanbanCard />  × n       // useDraggable
- *     <DragOverlay />             // floating preview while dragging
- *   </DndContext>
- * ```
- *
- * Drag lifecycle:
- *
- *  1. `onDragStart` stores the active ticket so the overlay can
- *     render a faithful copy at the cursor.
- *  2. `onDragEnd` reads the drop target id (matches `TicketStatus`),
- *     ignores no-op drops, and delegates to `onStatusChange` which
- *     in turn applies the optimistic update + PATCH.
- *
- * **Sensors:** a 5 px activation distance for the mouse and a 250 ms
- * delay for touch prevent accidental drags during a normal tap.
- */
-
 "use client";
 
 import {
@@ -44,10 +19,24 @@ import { useToast } from "@/hooks/use-toast";
 const STATUSES: TicketStatus[] = ["open", "in_progress", "in_review", "closed"];
 
 interface KanbanBoardProps {
+  /** The complete list of live tickets to group into Open, In Progress, In Review, and Closed lanes. */
   tickets: Ticket[];
+  /** Callback fired when a ticket is successfully dropped onto a new column, enabling backend sync. */
   onStatusChange: (ticketId: string, newStatus: TicketStatus) => Promise<void>;
 }
 
+/**
+ * `KanbanBoard` — drag-and-drop ticket board powered by `dnd-kit`.
+ *
+ * Layout:
+ * ```
+ *   <DndContext>                  // drag state for all descendants
+ *     <KanbanColumn /> × 4        // useDroppable, one per status
+ *       <KanbanCard />  × n       // useDraggable
+ *     <DragOverlay />             // floating preview while dragging
+ *   </DndContext>
+ * ```
+ */
 export function KanbanBoard({ tickets, onStatusChange }: KanbanBoardProps) {
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);

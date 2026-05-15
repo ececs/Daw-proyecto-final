@@ -233,9 +233,34 @@ El backend aplica automáticamente las migraciones de base de datos (`alembic up
 
 - Frontend: [http://localhost:3000](http://localhost:3000)
 - Backend: [http://localhost:8000](http://localhost:8000)
-- Swagger: [http://localhost:8000/docs](http://localhost:8000/docs)
+- Swagger Docs (Backend): [http://localhost:8000/docs](http://localhost:8000/docs)
+- ReDoc (API Ref): [http://localhost:8000/redoc](http://localhost:8000/redoc)
+- Storybook (Docs Frontend): [http://localhost:6006](http://localhost:6006)
 - MinIO Console: [http://localhost:9001](http://localhost:9001)
 - PostgreSQL expuesto en host: `localhost:5433`
+
+## Documentación Técnica e Infraestructura 📚
+
+El sistema se ha construido siguiendo principios de arquitectura limpia y auto-documentación, implementando dos portales interactivos de referencia técnica de última generación:
+
+### 📡 1. Capa Backend (OpenAPI 3.0 & FastAPI)
+El contrato de API RESTful del backend se autogenera y valida estáticamente mediante la integración nativa de **FastAPI y Pydantic v2**:
+- **Swagger UI**: Permite ejecutar interacciones vivas con el servidor, enviando peticiones HTTP reales y evaluando respuestas con esquemas en formato JSON Schema. Acceso en [http://localhost:8000/docs](http://localhost:8000/docs).
+- **ReDoc**: Ofrece una interfaz estática de tres columnas altamente legible ideal para el onboarding de ingenieros. Acceso en [http://localhost:8000/redoc](http://localhost:8000/redoc).
+
+### 🎨 2. Capa Frontend (Storybook & Vitest Browser)
+El frontend aísla su catálogo de diseño mediante **Storybook 8** en formato CSF3. Esta suite sirve tanto de galería interactiva de componentes modulares como de suite de pruebas unitarias y visuales del DOM:
+- **Levantamiento**:
+  ```bash
+  cd frontend
+  npm run storybook
+  ```
+- **Visor**: Disponible en [http://localhost:6006](http://localhost:6006).
+- **Componentes Cubiertos**:
+  *   `KanbanBoard`: El tablero principal que agrupa estados drag-and-drop.
+  *   `TicketTable`: Visualizaciones tabulares paginadas con estados vacío/cargando.
+  *   `TicketForm`: Formulario dinámico reactivo para operaciones Crear/Editar.
+  *   `ConfirmDialog`, `UserAvatar`, `Badge`: Elementos atómicos reutilizables de UI.
 
 #### Notas
 

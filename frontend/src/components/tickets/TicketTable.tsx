@@ -1,22 +1,3 @@
-/**
- * `TicketTable` — paginated, filterable and sortable list view.
- *
- * Columns: title, status, priority, assignee, created_at, actions.
- *
- * Filtering and sorting are **server-side**: every change pushes new
- * `filters` up to the parent, which propagates them to `useTickets`
- * and triggers a re-fetch. This keeps the payload small even with
- * thousands of tickets and lets the backend apply the sort_by
- * allow-list to defend against SQL-injection-via-column-name.
- *
- * Local responsibilities of the component:
- *
- * - Debounce the search input (350 ms) so each keystroke does not
- *   fire a network call.
- * - Drive the destructive-action UX (`ConfirmDialog`) and the
- *   "request deletion" fallback for non-author 403 responses.
- */
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -38,12 +19,19 @@ type SortField = "title" | "status" | "priority" | "created_at" | "ticket_number
 type SortDir = "asc" | "desc";
 
 interface TicketTableProps {
+  /** Paginated block of active tickets returned from current database query. */
   tickets: Ticket[];
+  /** The total matching ticket count satisfying global filter criteria (used for pagination count). */
   total: number;
+  /** Active search, sorting, priority, and status filtering state applied on current render. */
   filters: TicketFilters;
+  /** Event dispatcher to push mutated filtering constraints upstream for data-fetching. */
   onFiltersChange: (filters: TicketFilters) => void;
+  /** Event emitter delegating actual API deletion requests to the parent wrapper component. */
   onDeleteTicket: (id: string) => Promise<void>;
+  /** When true, covers the UI table layout with a loading skeleton preset. */
   isLoading: boolean;
+  /** Optional set of potential assignees used for visual profile picture rendering. */
   users?: User[];
 }
 
@@ -54,6 +42,15 @@ function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortFi
     : <ChevronDown className="w-3.5 h-3.5 text-blue-600" />;
 }
 
+/**
+ * `TicketTable` — paginated, filterable and sortable list view.
+ *
+ * Columns: title, status, priority, assignee, created_at, actions.
+ *
+ * Filtering and sorting are **server-side**: every change pushes new
+ * `filters` up to the parent, which propagates them to `useTickets`
+ * and triggers a re-fetch.
+ */
 export function TicketTable({
   tickets,
   total,

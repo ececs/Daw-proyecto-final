@@ -1,12 +1,3 @@
-/**
- * KanbanColumn — a droppable status column in the Kanban board.
- *
- * Uses dnd-kit's useDroppable hook. When a card is dragged over this column,
- * `isOver` becomes true and we apply a highlight ring to give visual feedback.
- *
- * Each column renders its ticket cards as KanbanCard components.
- */
-
 "use client";
 
 import { useDroppable } from "@dnd-kit/core";
@@ -23,11 +14,20 @@ const COLUMN_COLORS: Record<TicketStatus, string> = {
 };
 
 interface KanbanColumnProps {
+  /** The target status state (open, in_progress, in_review, closed) managing this droppable zone. */
   status: TicketStatus;
+  /** Filtered subset of global tickets that belong specifically to this status channel. */
   tickets: Ticket[];
+  /** Holds the active ticket identifier experiencing synchronous API operations (to display spinners). */
   updatingId?: string | null;
 }
 
+/**
+ * `KanbanColumn` — a droppable status column in the Kanban board.
+ *
+ * Uses `dnd-kit`'s `useDroppable` hook. When a card is dragged over this column,
+ * `isOver` becomes true and we apply a highlight ring to give visual feedback.
+ */
 export function KanbanColumn({ status, tickets, updatingId }: KanbanColumnProps) {
   // Why: the droppable id must equal the `TicketStatus` literal so
   // `onDragEnd` can extract the target status without a side table.

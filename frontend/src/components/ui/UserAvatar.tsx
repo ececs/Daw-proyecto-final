@@ -1,21 +1,15 @@
-/**
- * `UserAvatar` — profile picture with a graceful initials fallback.
- *
- * Renders the supplied `src` (Google avatar, DiceBear, …) and falls
- * back to a coloured circle with the user's first initial when:
- *
- * - `src` is `null` / empty (no avatar URL on the user record), or
- * - the image fails to load (404, blocked, CORS, ad-blocker).
- */
-
 "use client";
 
 import { useState, useEffect } from "react";
 
 interface UserAvatarProps {
+  /** The optional avatar URL (e.g. Google Profile, Dicebear seed). */
   src?: string | null;
+  /** The user's full name, utilized for generating initials and alt text. */
   name: string;
+  /** Visual diameter scaling preset (xs, sm, md, lg). Defaults to 'sm'. */
   size?: "xs" | "sm" | "md" | "lg";
+  /** Additional Tailwind class names for layout overrides. */
   className?: string;
 }
 
@@ -26,6 +20,14 @@ const SIZE_MAP = {
   lg: "w-16 h-16 text-xl",
 };
 
+/**
+ * `UserAvatar` — profile picture with a graceful initials fallback.
+ *
+ * Renders the supplied `src` (Google avatar, DiceBear, …) and falls
+ * back to a coloured circle with the user's first initial when:
+ * - `src` is `null` / empty (no avatar URL on the user record), or
+ * - the image fails to load (404, blocked, CORS, ad-blocker).
+ */
 export function UserAvatar({ src, name, size = "sm", className = "" }: UserAvatarProps) {
   const [hasError, setHasError] = useState(false);
   const initials = name ? name.charAt(0).toUpperCase() : "?";

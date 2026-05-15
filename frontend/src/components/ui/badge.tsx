@@ -1,10 +1,3 @@
-/**
- * Badge — small inline label used for status and priority chips.
- *
- * Uses class-variance-authority (cva) to define variants without Radix primitives,
- * since shadcn's badge component is purely CSS — there is no @radix-ui/react-badge package.
- */
-
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +25,11 @@ interface BadgeProps
   extends React.HTMLAttributes<HTMLSpanElement>,
     VariantProps<typeof badgeVariants> {}
 
+/**
+ * Badge — small inline label used for status and priority chips.
+ *
+ * Uses class-variance-authority (cva) to define variants without Radix primitives.
+ */
 export function Badge({ className, variant, ...props }: BadgeProps) {
   return <span className={cn(badgeVariants({ variant }), className)} {...props} />;
 }

@@ -1,12 +1,3 @@
-/**
- * `KanbanCard` — draggable ticket tile in the Kanban view.
- *
- * Wraps `dnd-kit`'s `useDraggable`. The card fades to 40 % opacity
- * while being dragged; the full-quality preview is rendered by
- * `KanbanBoard` as a `DragOverlay`. Tapping (no drag in progress)
- * navigates to the ticket detail page.
- */
-
 "use client";
 
 import { useDraggable } from "@dnd-kit/core";
@@ -18,10 +9,19 @@ import { UserAvatar } from "@/components/ui/UserAvatar";
 import { PRIORITY_CONFIG } from "@/lib/utils";
 
 interface KanbanCardProps {
+  /** The single ticket data model to present visual metadata and handle DnD actions. */
   ticket: Ticket;
+  /** Disables dragging operations and presents a spinner overlays while updating API state. */
   isUpdating?: boolean;
 }
 
+/**
+ * `KanbanCard` — draggable ticket tile in the Kanban view.
+ *
+ * Wraps `dnd-kit`'s `useDraggable`. The card fades to 40 % opacity
+ * while being dragged; the full-quality preview is rendered by
+ * `KanbanBoard` as a `DragOverlay`.
+ */
 export function KanbanCard({ ticket, isUpdating = false }: KanbanCardProps) {
   const router = useRouter();
 

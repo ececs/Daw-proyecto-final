@@ -24,24 +24,19 @@ from app.schemas.websocket import WSMessage
 
 
 class WebSocketManager:
-    """Manages active WebSocket client connections inside the asyncio event loop.
+    """In-process registry of active WebSocket connections.
 
-    Handles registration, teardown, and delivery routing of real-time payloads
-    supporting multi-tab routing by mapping single user identities to list pools
-    of network sockets.
+    Maps `user_id` (string) to a list of open sockets so the same user
+    can have multiple tabs receiving the same events. The registry is
+    not shared across replicas — cross-process fan-out is handled by
+    `pubsub_service` on top of Redis Pub/Sub.
     """
 
     def __init__(self) -> None:
-        # Dict mapping user UUID -> list of active WebSocket connections for that user
         self.connections: dict[str, list[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: uuid.UUID) -> None:
-        """Accepts a new WebSocket connection and registers it for the specified user.
-
-        Args:
-            websocket: The FastAPI WebSocket instance to register.
-            user_id: The authenticated UUID identity of the user.
-        """
+        """Accept the socket and add it to the user's connection list."""
         await websocket.accept()
         key = str(user_id)
         if key not in self.connections:
@@ -49,41 +44,26 @@ class WebSocketManager:
         self.connections[key].append(websocket)
 
     def disconnect(self, websocket: WebSocket, user_id: uuid.UUID) -> None:
-        """Deregisters and removes a WebSocket connection upon client disconnection.
-
-        Performs memory pool cleanup by purging mapping keys associated with zero active sockets.
-
-        Args:
-            websocket: The disconnected WebSocket instance to drop.
-            user_id: The UUID identity owner of the target socket list.
-        """
+        """Remove a closed socket and prune the entry when it becomes empty."""
         key = str(user_id)
         if key in self.connections:
             self.connections[key] = [
                 ws for ws in self.connections[key] if ws is not websocket
             ]
-            # Clean up empty lists to avoid memory leaks
             if not self.connections[key]:
                 del self.connections[key]
 
     async def broadcast_to_all(self, data: dict | WSMessage) -> None:
-        """Transmits a JSON payload to every currently active user socket connection.
-
-        Args:
-            data: The payload dictionary or validated WSMessage model to broadcast.
-        """
+        """Send `data` to every connected user (used by global events)."""
         for user_id in list(self.connections.keys()):
             await self.broadcast_to_user(user_id, data)
 
     async def broadcast_to_user(self, user_id: str, data: dict | WSMessage) -> None:
-        """Transmits a payload to all active connection sockets owned by a specific user.
+        """Send `data` to all sockets of `user_id`, dropping broken ones.
 
-        Handles runtime encoding from direct JSON dictionaries or structured validation
-        objects. Automatically intercepts broken connections, dropping them from the pool.
-
-        Args:
-            user_id: The target user UUID string identifier.
-            data: The validated WSMessage model or dictionary framing the notification.
+        Accepts both `WSMessage` instances (serialised via Pydantic) and
+        raw dicts. Sockets that raise during `send_text` are considered
+        dead and removed from the registry so we do not retry forever.
         """
         if user_id not in self.connections:
             return 

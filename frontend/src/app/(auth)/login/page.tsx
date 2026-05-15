@@ -43,10 +43,10 @@ export default function LoginPage() {
         // Use the existing callback route to set the cookie and redirect to /board
         window.location.href = `/api/auth/callback?token=${data.token}`;
       } else {
-        setError(data.detail || "Código de acceso inválido.");
+        setError(data.detail || "Invalid access code.");
       }
     } catch {
-      setError("Error al conectar con el servidor.");
+      setError("Could not connect to the server.");
     } finally {
       setLoading(false);
     }

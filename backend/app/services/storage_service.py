@@ -1,8 +1,8 @@
-"""Asynchronous S3-compatible object storage interaction engine.
+"""S3-compatible object storage client.
 
-Provides decoupled file upload, removal, and retrieval abstractions leveraging aiobotocore.
-Facilitates offloaded client downloads by generating time-sensitive Presigned URLs,
-minimizing server bandwidth exhaustion and improving overall cloud storage scaling.
+Async helpers around `aiobotocore` for uploading, downloading, deleting
+and generating presigned URLs against any S3-compatible backend (Amazon
+S3, MinIO, Backblaze B2, ...). Used by the attachments pipeline.
 """
 
 import uuid
@@ -16,9 +16,11 @@ from app.core.config import settings
 
 @asynccontextmanager
 async def _s3_client():
-    """Yields an active, asynchronous boto3 S3-compatible client instance.
+    """Yield a configured async S3 client built from `settings`.
 
-    Injects endpoint, access, and secret key values populated from local application settings.
+    The credentials and endpoint come from environment-driven `settings`
+    so swapping between MinIO (local dev), Amazon S3 and a self-hosted
+    backend requires no code change.
     """
     session = aiobotocore.session.get_session()
     async with session.create_client(
@@ -32,7 +34,12 @@ async def _s3_client():
 
 
 def _make_storage_key(ticket_id: uuid.UUID, filename: str) -> str:
-    """Generates a secure, collision-resistant absolute storage key path string."""
+    """Build a collision-resistant object key.
+
+    Layout: ``tickets/<ticket_id>/<random-uuid>/<filename>``. The random
+    prefix guarantees uniqueness even if the same filename is uploaded
+    twice on the same ticket.
+    """
     unique_prefix = uuid.uuid4()
     return f"tickets/{ticket_id}/{unique_prefix}/{filename}"
 
@@ -43,16 +50,16 @@ async def upload_file(
     content: bytes,
     mime_type: str,
 ) -> str:
-    """Uploads raw binary file byte streams to remote S3 compatible buckets.
+    """Upload `content` and return the generated storage key.
 
     Args:
-        ticket_id: UUID reference of the parent ticket organizing the files.
-        filename: Clean base filename preserving the uploaded file extensions.
-        content: Encoded binary content representing the object payload.
-        mime_type: Content-Type string metadata determining web browser behavior.
-
-    Returns:
-        str: Formatted unique object storage key.
+        ticket_id: Owning ticket.
+        filename: Original filename (preserved verbatim in the key for
+            human readability).
+        content: Raw bytes to store.
+        mime_type: `Content-Type` written into the object metadata so
+            browsers render it correctly when accessed via the presigned
+            URL.
     """
     key = _make_storage_key(ticket_id, filename)
     async with _s3_client() as s3:
@@ -66,14 +73,11 @@ async def upload_file(
 
 
 async def get_presigned_url(storage_key: str, expires_in: int = 3600) -> str:
-    """Generates a secured GET presigned URL for temporary direct browser download.
+    """Generate a time-limited GET URL for direct browser download.
 
     Args:
-        storage_key: Fully-qualified path to the object stored within the bucket.
-        expires_in: Expiration lifespan in seconds (Defaults to 3600/1 hour).
-
-    Returns:
-        str: Signed access URL containing temporary credential signatures.
+        storage_key: Key returned by `upload_file`.
+        expires_in: Lifetime of the URL in seconds (default: 1 hour).
     """
     async with _s3_client() as s3:
         url = await s3.generate_presigned_url(
@@ -85,9 +89,10 @@ async def get_presigned_url(storage_key: str, expires_in: int = 3600) -> str:
 
 
 async def download_file(storage_key: str) -> bytes:
-    """Directly downloads full binary content payloads from object stores into memory.
+    """Read the full object content into memory.
 
-    Primarily executed by internal background ingestion tasks bypass secondary URL hops.
+    Used by background ingestion jobs that need the raw bytes; clients
+    should normally fetch the file via `get_presigned_url` instead.
     """
     async with _s3_client() as s3:
         response = await s3.get_object(Bucket=settings.STORAGE_BUCKET, Key=storage_key)
@@ -95,6 +100,6 @@ async def download_file(storage_key: str) -> bytes:
 
 
 async def delete_file(storage_key: str) -> None:
-    """Removes an object from the active remote bucket matching the specified key."""
+    """Delete the object identified by `storage_key`."""
     async with _s3_client() as s3:
         await s3.delete_object(Bucket=settings.STORAGE_BUCKET, Key=storage_key)

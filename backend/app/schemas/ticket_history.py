@@ -1,7 +1,4 @@
-"""Audit trail chronological tracking schemas.
-
-Maps state transitions and user-driven mutations across system incidents.
-"""
+"""Pydantic schemas for the ticket audit history endpoint."""
 
 import uuid
 from datetime import datetime
@@ -11,11 +8,7 @@ from app.schemas.user import UserOut
 
 
 class TicketHistoryOut(BaseModel):
-    """Serialized output schema reflecting a single delta mutation log.
-
-    Defines point-in-time captures storing prior values, new configurations,
-    and the initiating administrative actor identities.
-    """
+    """Response shape for one row of a ticket's audit trail."""
     id: uuid.UUID
     ticket_id: uuid.UUID | None
     actor: UserOut | None = None

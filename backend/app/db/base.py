@@ -1,15 +1,8 @@
-"""Database base mapping architecture.
-
-Defines the SQLAlchemy DeclarativeBase parent from which all application ORM
-models must inherit to enable declarative mapping metadata discovery.
-"""
+"""Declarative base for every ORM model in the project."""
 
 from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """Declarative parent class for SQLAlchemy ORM database models.
-
-    Aggregates model class metadata ensuring consistent registry and schema reflection.
-    """
+    """Shared `DeclarativeBase` — every `app.models.*` table inherits from this."""
     pass

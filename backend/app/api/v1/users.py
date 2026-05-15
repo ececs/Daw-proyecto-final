@@ -1,7 +1,8 @@
-"""User directory API endpoints.
+"""User directory endpoints.
 
-Provides validated client access to enterprise personnel listings and role structures.
-Requires valid active JWT sessions for all retrieval operations.
+Read-only access to the user collection. Used by the frontend to populate
+assignee pickers and mention dropdowns. Authentication is required for all
+operations.
 """
 
 from typing import List
@@ -15,11 +16,9 @@ router = APIRouter(prefix="/users", tags=["Users"])
 
 @router.get("", response_model=List[UserOut], summary="List all users")
 async def list_users(current_user: CurrentUser, db: DB):
-    """Fetches alphabetical listings of all registered system operators.
-
-    Access requires a verified Bearer token issued during authentication cycles.
+    """Return every registered user, ordered alphabetically by name.
 
     Returns:
-        List[UserOut]: Comprehensive enumeration of active user metadata structures.
+        list[UserOut]: All users in the directory.
     """
     return await user_service.list_users(db)

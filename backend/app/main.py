@@ -35,15 +35,16 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manages the FastAPI application lifecycle.
+    """FastAPI startup / shutdown context.
 
-    On startup, it executes environment variable diagnostics, configures LangSmith,
-    initializes object storage and checkpointer resources, and launches the background
-    real-time notification listeners.
-    On shutdown, it gracefully cancels listeners and tears down resource pools.
+    On startup: log which API keys are present, configure LangSmith,
+    create the storage bucket if missing, start the LangGraph
+    checkpointer pool, connect the Redis cache, warm up the LLM
+    singleton and launch the real-time listener (Redis Pub/Sub when
+    available, PG `LISTEN/NOTIFY` otherwise).
 
-    Args:
-        app: The FastAPI application instance.
+    On shutdown: cancel the listener and close the cache / checkpointer
+    pools so the process exits cleanly on SIGTERM.
     """
     # Startup diagnostics
     import logging
@@ -94,10 +95,9 @@ async def lifespan(app: FastAPI):
 
 
 def _init_langsmith() -> None:
-    """Configures LangSmith tracing by propagating settings to system environment variables.
+    """Forward LangSmith config into the env vars LangChain auto-detects.
 
-    Maps application settings directly to the environment keys auto-detected by LangChain,
-    enabling transparent agent lifecycle tracing in both dev and production runners.
+    No-ops when tracing is disabled or the API key is missing.
     """
     if not settings.LANGSMITH_TRACING or not settings.LANGSMITH_API_KEY:
         logger.info("LangSmith tracing disabled")
@@ -111,13 +111,11 @@ def _init_langsmith() -> None:
 
 
 async def _init_storage() -> None:
-    """Initializes the object storage bucket for attachments.
+    """Ensure the attachments bucket exists; create it on first run.
 
-    Checks for the existence of the configured bucket in MinIO or Cloudflare R2 and
-    creates it if missing. Runs as an idempotent procedure during application startup.
-
-    Raises:
-        ClientError: If connectivity or credentials prevent bucket interrogation or creation.
+    Idempotent: a successful `head_bucket` is a no-op; a 404 triggers a
+    `create_bucket`; any other error (auth, network) intentionally
+    propagates and aborts startup.
     """
     s3 = boto3.client(
         "s3",
@@ -136,13 +134,11 @@ async def _init_storage() -> None:
 
 
 async def _pg_listen_loop() -> None:
-    """Listens for database notification triggers in a persistent background task.
+    """Subscribe to PG `NOTIFY notifications` and fan out to WebSocket clients.
 
-    Establishes a dedicated, long-lived database connection via asyncpg to subscribe
-    to the 'notifications' channel. Relays any incoming JSON payloads to WebSocket clients.
-
-    Uses asyncpg directly instead of SQLAlchemy as SQLAlchemy is structurally designed
-    for discrete request-response cycles rather than long-running callbacks.
+    Uses `asyncpg` directly (not SQLAlchemy) because the underlying
+    connection has to stay open for the entire process lifetime; the
+    SQLAlchemy pool is request-scoped and would close the listener.
     """
     # Build a raw asyncpg connection URL (asyncpg uses its own URL format)
     raw_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
@@ -150,14 +146,7 @@ async def _pg_listen_loop() -> None:
     conn: asyncpg.Connection = await asyncpg.connect(raw_url)
 
     async def on_notification(connection, pid, channel, payload):
-        """Handles incoming PostgreSQL NOTIFY message payloads.
-
-        Args:
-            connection: The current active asyncpg connection.
-            pid: The process ID of the notifying database backend.
-            channel: The string identifier of the notification channel.
-            payload: The JSON string frame delivered by the trigger.
-        """
+        """Parse one NOTIFY payload and route it through the WebSocket manager."""
         try:
             data = json.loads(payload)
             user_id = data.get("user_id")
@@ -220,9 +209,5 @@ app.include_router(knowledge.router, prefix="/api/v1")
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    """Executes a basic service health check.
-
-    Returns:
-        dict: A dictionary status report containing health metrics and versions.
-    """
+    """Liveness probe — returns `{"status": "ok", "version": "..."}`."""
     return {"status": "ok", "version": "0.1.1"}

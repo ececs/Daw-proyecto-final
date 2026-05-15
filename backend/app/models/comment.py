@@ -15,11 +15,7 @@ from app.db.base import Base
 
 
 class Comment(Base):
-    """Represents a threaded discussion entry posted within a specific ticket.
-
-    Acts as a communication log chronologically grouped underneath parent incident
-    records, storing textual data and associating ownership to a specific system user.
-    """
+    """A comment posted on a ticket. Cascades on ticket delete."""
 
     __tablename__ = "comments"
 

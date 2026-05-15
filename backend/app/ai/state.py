@@ -1,8 +1,9 @@
-"""AI Agent execution state and configuration schema definitions.
+"""LangGraph state schema for the AI agent.
 
-Defines the schema for the AI agent's state using Pydantic-compatible
-TypedDicts. By using Annotated and add_messages, we enable LangGraph to
-automatically manage conversation history.
+`AgentState` is the dictionary shape the LangGraph runtime threads
+through every node of the agent graph. The `Annotated[..., add_messages]`
+hint lets LangGraph append new messages to the list automatically
+instead of overwriting it, which is what enables stateful conversations.
 """
 
 from typing import Annotated, Sequence, TypedDict
@@ -12,21 +13,23 @@ from langgraph.graph.message import add_messages
 
 
 class AgentState(TypedDict):
-    """Represents the active execution state of the conversational agent.
+    """State carried across nodes of the ReAct agent graph.
 
-    Utilizes annotated message sequences allowing LangGraph to automatically accumulate,
-    merge, and window conversational interaction histories.
+    Attributes:
+        messages: Conversation history; LangGraph appends to it via
+            `add_messages`.
+        remaining_steps: Required by `create_react_agent` to bound the
+            ReAct loop and prevent runaway tool-call cycles.
     """
     messages: Annotated[Sequence[BaseMessage], add_messages]
-    # Required by create_react_agent to prevent infinite loops
     remaining_steps: int
 
 
 class AgentConfig(BaseModel):
-    """Configures session metadata scoped to a single agent execution cycle.
+    """Per-invocation configuration bound to a chat session.
 
-    Provides unique thread and authenticated requester bindings to enforce context
-    isolation and secure resource ownership in multi-tenant operations.
+    Used to scope checkpoints and tool authorisation to the right
+    conversation and user.
     """
     thread_id: str = Field(..., description="Unique session identifier")
     user_id: str = Field(..., description="ID of the user interacting with the agent")

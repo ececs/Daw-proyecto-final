@@ -1,8 +1,9 @@
-"""LangGraph AI Orchestration API Layer.
+"""AI agent REST API.
 
-Exposes interactive streaming event interfaces consuming state graphs and triggering
-tool-use operations. Maintains conversational long-term memory checkpoints via
-isolated Postgres threads and publishes discrete execution feedbacks.
+FastAPI routes that drive the LangGraph agent: streaming chat over SSE,
+chat history retrieval from the Postgres checkpointer, AI status and
+metrics endpoints, and the feedback submission endpoint used by the
+thumbs-up/down UI.
 """
 
 import json
@@ -30,13 +31,18 @@ router = APIRouter(prefix="/ai", tags=["AI Agent"])
 
 
 class ChatMessage(BaseModel):
-    """Discrete message schema for incoming conversational chat threads."""
-    role: str   # "user" | "assistant"
+    """Single message in a chat request (`role` is `"user"` or `"assistant"`)."""
+    role: str
     content: str
 
 
 class ChatRequest(BaseModel):
-    """Inbound body schema initiating interactive AI assistant executions."""
+    """Body of `POST /ai/chat`.
+
+    Carries the user's prompt history together with optional UI context
+    (current ticket, multi-selected tickets) and the desired provider
+    override.
+    """
     messages: List[ChatMessage]
     thread_id: Optional[str] = None
     current_ticket_id: Optional[str] = None
@@ -52,22 +58,20 @@ async def _agent_sse_stream(
     tracker: ai_metrics_service.AIRunTracker,
     ai_run_id: str,
 ):
-    """Generates a formatted Server-Sent Events (SSE) text stream from graph execution.
+    """Translate the LangGraph event stream into SSE frames.
 
-    Iterates through LangGraph's asynchronous event stream, extracting token chunks
-    from chat models and tool execution notifications. Intercepts high-risk tool output
-    tokens to inject specialized client-side interrupt UI confirmation events.
+    Forwards model tokens, `tool_start` / `tool_call` boundaries and
+    error events to the browser. Two special tool outputs are intercepted
+    here and turned into UI events instead of plain tool results:
 
-    Args:
-        agent: The compiled LangGraph agent executable instance.
-        initial_state: Dict outlining input message arrays and step counts.
-        config: Configuration mappings holding unique session thread identifiers.
-        thread_id: The active memory key for storing message checkpoints.
-        tracker: Operational telemetry collector for recording run analytics.
-        ai_run_id: Database primary key for finalizing tracking logs.
+    - `__DELETE_REQUESTED__:...` → `confirmation_required` (author asked
+      to delete their own ticket; the frontend shows a confirm dialog).
+    - `__DELETE_REQUEST_OFFER__:...` → `deletion_request_offer` (a non-
+      author asked to delete; the frontend offers to *notify* the author
+      instead).
 
     Yields:
-        str: Serialized event stream payloads conforming to text/event-stream spec.
+        str: Lines in the `data: <json>\\n\\n` SSE format.
     """
     v_logger = logging.getLogger("uvicorn.error")
     yield f"data: {json.dumps({'type': 'session', 'thread_id': thread_id, 'ai_run_id': ai_run_id})}\n\n"
@@ -140,7 +144,10 @@ async def _agent_sse_stream(
 
 
 def _make_friendly_error(error_msg: str) -> str:
-    """Translates low-level cloud provider exceptions into user-friendly messages."""
+    """Map a raw provider error message into a human-readable Spanish line.
+
+    Falls back to the original message when no rule matches.
+    """
     if "429" in error_msg or "quota" in error_msg.lower():
         return "*(Sistema: Límite de uso de IA alcanzado. Espera unos segundos.)*"
     if "api_key" in error_msg.lower() or "401" in error_msg:
@@ -151,7 +158,12 @@ def _make_friendly_error(error_msg: str) -> str:
 async def _resolve_ticket_id_for_chat(
     request: ChatRequest, db: AsyncSession
 ) -> uuid.UUID | None:
-    """Resolves numeric identifiers or UUID references into actual Ticket IDs."""
+    """Pick a single ticket id out of the chat-request UI context.
+
+    Prefers `current_ticket_id`; falls back to `selected_ticket_ids`
+    only when exactly one ticket is selected. Returns `None` when no
+    unambiguous target can be derived.
+    """
     from app.models.ticket import Ticket
 
     async def resolve_ref(ref: str) -> uuid.UUID | None:
@@ -181,12 +193,16 @@ async def _resolve_ticket_id_for_chat(
     return None
 
 
-@router.get("/history/{thread_id}")
+@router.get("/history/{thread_id}", summary="Get chat history for a thread")
 async def get_chat_history(thread_id: str):
-    """Fetches historical message arrays for a specific persistent checkpoint thread.
+    """Return the persisted chat messages for a given thread.
 
-    Allows the frontend interfaces to recover rendering state on page reload events
-    by reading from backend checkpointers instead of client localStorage.
+    Reads the LangGraph checkpointer (PostgreSQL) so the frontend can
+    rehydrate the conversation after a page reload without storing
+    history in `localStorage`.
+
+    Returns:
+        dict: `{"messages": [{"role": str, "content": str}, ...]}`.
     """
     checkpointer = get_checkpointer()
     if not checkpointer:
@@ -207,17 +223,23 @@ async def get_chat_history(thread_id: str):
     return {"messages": history}
 
 
-@router.post("/chat")
+@router.post("/chat", summary="Stream an AI chat response (SSE)")
 async def chat(
     request: ChatRequest,
     db: DB,
     current_user: CurrentUser,
 ):
-    """Processes interactive user chat requests generating streamed SSE responses.
+    """Run the agent on the user's prompt and stream the answer as SSE.
 
-    Performs full session initialization, fetching supplementary frontend context
-    (active/selected tickets), registering backend telemetry runs, and instantiating
-    a customized dynamic LangGraph execution thread mapped to Postgres memory.
+    Pipeline per request:
+
+    1. Build an `AIRunTracker` and an `AIRun` row so latency, cost and
+       provider/model are recorded even if the client disconnects.
+    2. Fetch the optional ticket context from the request body and
+       compose the extra system context the agent will see.
+    3. Compile a fresh `build_agent(...)` graph bound to this session.
+    4. Stream LangGraph events through `_agent_sse_stream`; finalise the
+       `AIRun` in a `finally` block.
     """
     checkpointer = get_checkpointer()
     thread_id = request.thread_id or str(current_user.id)
@@ -362,10 +384,12 @@ async def get_ai_status(
     db: DB,
     since: str | None = None,
 ):
-    """Exposes point-in-time diagnostics for current AI operations.
+    """Return the live AI status merged with per-session metrics.
 
-    Generates a merged report reflecting in-memory provider configurations and
-    database-aggregated historical metrics filtered by current session bounds.
+    The base payload comes from the in-memory `observability` module
+    (provider, model, fallback availability); when `since` is provided,
+    per-user database statistics from that point in time are merged on
+    top.
     """
     base = observability.get_status()
     if since:
@@ -383,15 +407,15 @@ async def get_ai_status(
     return base
 
 
-@router.get("/stats")
+@router.get("/stats", summary="Global AI usage dashboard")
 async def get_ai_stats(db: DB, current_user: CurrentUser):
-    """Retrieves application-wide rolling analytics for system-wide executions."""
+    """Return the global AI metrics summary used by the analytics dashboard."""
     return await ai_metrics_service.get_stats_summary(db)
 
 
-@router.get("/stats/tickets/{ticket_ref}")
+@router.get("/stats/tickets/{ticket_ref}", summary="AI metrics for a single ticket")
 async def get_ticket_ai_stats(ticket_ref: str, db: DB, current_user: CurrentUser):
-    """Retrieves operational telemetry metrics scoped to a specific Ticket reference."""
+    """Return AI usage metrics scoped to a single ticket."""
     ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
@@ -404,9 +428,13 @@ async def get_ticket_ai_stats(ticket_ref: str, db: DB, current_user: CurrentUser
         raise
 
 
-@router.post("/feedback")
+@router.post("/feedback", summary="Submit thumbs-up/down feedback for an AI run")
 async def create_ai_feedback(payload: AIFeedbackCreate, db: DB, current_user: CurrentUser):
-    """Persists objective and subjective evaluation feedback left by users on runs."""
+    """Upsert the current user's feedback on a previous `AIRun`.
+
+    Raises:
+        HTTPException: **404** if the `ai_run_id` does not exist.
+    """
     run = await db.get(AIRun, payload.ai_run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="AI run not found")

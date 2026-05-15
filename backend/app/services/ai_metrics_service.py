@@ -1,8 +1,11 @@
-"""AI analytics, telemetry, and performance measurement service.
+"""AI usage telemetry and analytics service.
 
-Tracks operational performance vectors quantifying execution costs, user feedback counts,
-semantic search efficiency, and multi-agent model failovers. Aggregates high-level
-business metrics contrasting resolution timescales with and without active AI agents.
+Persists one `AIRun` row per LLM-backed operation (chat, diagnosis, reply
+draft, agent tool execution) plus optional `AIFeedback` rows when the
+operator rates the result. The aggregation helpers expose dashboard-ready
+metrics: success/fallback rates, RAG hit rate, estimated cost, and a
+comparison of time-to-close for tickets that did or did not benefit from
+AI assistance.
 """
 
 from __future__ import annotations
@@ -23,6 +26,8 @@ from app.models.ai_run import AIRun
 from app.models.ticket import Ticket
 from app.models.ticket_history import TicketHistory
 
+# Public pricing as of project freeze date (USD per 1 M tokens). Used only
+# for cost *estimation*; the source of truth is each provider's invoice.
 MODEL_PRICING_PER_MILLION = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
@@ -31,7 +36,7 @@ MODEL_PRICING_PER_MILLION = {
 
 
 def ensure_utc(dt: datetime | None) -> datetime | None:
-    """Forces timestamp zone objects into explicit UTC alignment formats."""
+    """Return `dt` with an explicit UTC timezone, treating naive values as UTC."""
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -40,14 +45,23 @@ def ensure_utc(dt: datetime | None) -> datetime | None:
 
 
 def estimate_tokens(text: str | None) -> int:
-    """Applies heuristics to determine token usage estimates based on input lengths."""
+    """Estimate the number of tokens in `text`.
+
+    Uses the classic "≈4 characters per token" heuristic. This is good
+    enough for cost estimation but should not be relied on for hard
+    context-window limits.
+    """
     if not text:
         return 0
     return max(1, math.ceil(len(text) / 4))
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Calculates estimated dollars charged matching current pricing metrics."""
+    """Estimate the USD cost of a call using `MODEL_PRICING_PER_MILLION`.
+
+    Returns 0.0 when the model is not in the pricing table — typical for
+    fallback or self-hosted models for which we do not bill the user.
+    """
     pricing = MODEL_PRICING_PER_MILLION.get(model)
     if not pricing:
         return 0.0
@@ -57,12 +71,16 @@ def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> floa
 
 
 def configured_primary_signature() -> tuple[str, str]:
-    """Recover active provider configuration signatures."""
+    """Return the configured primary `(provider, model)` pair."""
     return settings.AI_PROVIDER, settings.AI_MODEL
 
 
 def detect_provider_and_model(event_name: str | None) -> tuple[str, str]:
-    """Scans incoming event names parsing corresponding model classification strings."""
+    """Infer the provider and model from a LangChain event name.
+
+    Used during streaming to detect when the runtime silently switched to
+    a fallback provider (e.g. Google when OpenAI is rate-limited).
+    """
     name = event_name or ""
     lowered = name.lower()
     if "openai" in lowered:
@@ -73,7 +91,12 @@ def detect_provider_and_model(event_name: str | None) -> tuple[str, str]:
 
 
 def normalize_rag_source(sources: set[str]) -> str:
-    """Collapses disparate set sources into unified string namespace definitions."""
+    """Collapse a set of RAG source tags into a single label.
+
+    - Empty / only `"none"` → `"none"`
+    - Several distinct sources → `"mixed"`
+    - Exactly one source → that source's name.
+    """
     cleaned = {src for src in sources if src and src != "none"}
     if not cleaned:
         return "none"
@@ -84,10 +107,13 @@ def normalize_rag_source(sources: set[str]) -> str:
 
 @dataclass
 class AIRunTracker:
-    """Telemetry tracking context monitoring individual AI run operational lifecycles.
+    """Mutable in-memory accumulator for a single AI run.
 
-    Accumulates live execution states, RAG performance, failover indicators,
-    latency records, and token completion payloads.
+    Acts as a write-buffer for everything we want to persist in the
+    `AIRun` row at the end of the request: token counts, RAG statistics,
+    tool-action counters, fallback detection and latency. Decoupling this
+    from the ORM model means call sites do not have to commit partial
+    state mid-stream.
     """
     surface: str
     user_id: uuid.UUID
@@ -109,7 +135,11 @@ class AIRunTracker:
     error_message: str | None = None
 
     def register_model(self, event_name: str | None) -> None:
-        """Analyzes observed model event names flagging fallback activations."""
+        """Record the provider/model observed in an LLM event.
+
+        If it differs from the primary configuration, sets `used_fallback`
+        so the AIRun row reflects that a fallback path was taken.
+        """
         observed_provider, observed_model = detect_provider_and_model(event_name)
         self.provider = observed_provider
         self.model = observed_model
@@ -117,29 +147,29 @@ class AIRunTracker:
             self.used_fallback = True
 
     def add_tool_action(self) -> None:
-        """Increments local trackers logging successful agent tool triggerings."""
+        """Increment the counter of successful agent tool invocations."""
         self.tool_actions_count += 1
 
     def record_rag(self, queries: int, hits: int, source: str) -> None:
-        """Records query totals and hit metrics received during context assemblies."""
+        """Accumulate one RAG retrieval round into the tracker."""
         self.rag_queries_count += max(0, queries)
         self.rag_hits_count += max(0, hits)
         if source:
             self.rag_sources.add(source)
 
     def append_output(self, text: str) -> None:
-        """Parses text spans estimating sequential output token growths."""
+        """Add the estimated token count of `text` to `output_tokens`."""
         if text:
             self.output_tokens += estimate_tokens(text)
 
     @property
     def latency_ms(self) -> int:
-        """Calculates absolute execution elapsed millisecond intervals."""
+        """Elapsed time since `started_at`, in milliseconds."""
         return int((datetime.now(timezone.utc) - self.started_at).total_seconds() * 1000)
 
     @property
     def rag_source(self) -> str:
-        """Normalizes cumulative dynamic chunk collections."""
+        """Single label summarising all RAG sources seen during the run."""
         return normalize_rag_source(self.rag_sources)
 
 
@@ -154,7 +184,11 @@ async def create_ai_run(
     model: str | None = None,
     estimated_input_tokens: int | None = None,
 ) -> AIRun:
-    """Initializes an operational AIRun metrics baseline log entry."""
+    """Insert an `AIRun` row in the "started" state and return it.
+
+    The row starts with `success=False`; `finalize_ai_run` flips it once
+    the request finishes successfully.
+    """
     ai_run = AIRun(
         user_id=user_id,
         surface=surface,
@@ -179,7 +213,11 @@ async def finalize_ai_run(
     success: bool,
     error_message: str | None = None,
 ) -> AIRun:
-    """Concludes execution tracks, persists costs, and fires system-wide OpenTelemetry signals."""
+    """Persist the tracker into `ai_run` and emit observability metrics.
+
+    Always called from a `try/finally` so the row reflects whether the
+    request succeeded, even when the client disconnects mid-stream.
+    """
     ai_run.provider = tracker.provider
     ai_run.model = tracker.model
     ai_run.used_fallback = tracker.used_fallback
@@ -223,7 +261,11 @@ async def create_feedback(
     label: str | None = None,
     notes: str | None = None,
 ) -> AIFeedback:
-    """Registers qualitative user satisfaction records bound to AI execution instances."""
+    """Upsert the user's thumbs-up/down feedback for a given AIRun.
+
+    Only one feedback per `(ai_run_id, user_id)` is allowed; subsequent
+    calls overwrite the existing row.
+    """
     existing = await db.execute(
         select(AIFeedback).where(
             AIFeedback.ai_run_id == ai_run_id,
@@ -250,7 +292,12 @@ async def create_feedback(
 
 
 async def _first_close_map(db: AsyncSession) -> dict[uuid.UUID, datetime]:
-    """Compiles explicit datetime mappings tracking first 'closed' transitions."""
+    """Return `{ticket_id: timestamp_of_first_close}` for every closed ticket.
+
+    Used by both the global and per-ticket summaries to compute
+    time-to-close — the *first* transition to `closed` is what counts,
+    re-opens after that are ignored.
+    """
     result = await db.execute(
         select(TicketHistory.ticket_id, func.min(TicketHistory.created_at))
         .where(
@@ -270,7 +317,10 @@ async def _first_close_map(db: AsyncSession) -> dict[uuid.UUID, datetime]:
 async def get_session_stats(
     db: AsyncSession, user_id: uuid.UUID, since: datetime
 ) -> dict:
-    """Compiles user-scoped dashboard summaries scanning local user execution sessions."""
+    """Return per-user AI usage statistics since `since`.
+
+    Drives the "AI activity" panel in the frontend session menu.
+    """
     runs = (
         await db.execute(
             select(AIRun)
@@ -315,9 +365,11 @@ async def get_session_stats(
 
 
 async def get_stats_summary(db: AsyncSession) -> dict:
-    """Builds comprehensive global analytics aggregating system-wide ROI benchmarks.
+    """Return the global AI metrics dashboard.
 
-    Compares resolution velocities of AI-aided incidents against purely human-solved flows.
+    Aggregates every `AIRun` and `AIFeedback` row plus a comparison of
+    time-to-close between tickets that received AI assistance before
+    being closed and those that did not.
     """
     runs = (await db.execute(select(AIRun))).scalars().all()
     feedback_rows = (await db.execute(select(AIFeedback))).scalars().all()
@@ -350,6 +402,9 @@ async def get_stats_summary(db: AsyncSession) -> dict:
             runs_by_ticket.setdefault(run.ticket_id, []).append(run)
             ai_ticket_costs[run.ticket_id] = ai_ticket_costs.get(run.ticket_id, 0.0) + float(run.estimated_cost_usd or 0)
 
+    # Why: a ticket counts as "AI-assisted" only if at least one AIRun
+    # started before the first close transition — runs created after the
+    # ticket was closed cannot have helped solve it.
     for ticket in tickets:
         closed_at = first_close.get(ticket.id)
         if not closed_at:
@@ -390,7 +445,11 @@ async def get_stats_summary(db: AsyncSession) -> dict:
 
 
 async def get_ticket_stats(db: AsyncSession, ticket_id: uuid.UUID) -> dict:
-    """Gathers granular analytical feedback metrics scoped to a single incident record."""
+    """Return AI usage metrics scoped to a single ticket.
+
+    Raises:
+        ValueError: If `ticket_id` does not exist.
+    """
     ticket = await db.get(Ticket, ticket_id)
     if not ticket:
         raise ValueError("Ticket not found")

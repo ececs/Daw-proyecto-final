@@ -1,7 +1,4 @@
-"""Notification routing delivery schemas.
-
-Contains validation boundaries for internal notifications and streaming Pub/Sub.
-"""
+"""Pydantic schemas for notifications."""
 
 import uuid
 from datetime import datetime
@@ -10,8 +7,9 @@ from app.models.notification import NotificationType
 
 from typing import Optional
 
+
 class NotificationOut(BaseModel):
-    """Serialized output schema representing localized backend notifications."""
+    """Response shape for a notification row."""
     id: uuid.UUID
     user_id: uuid.UUID
     type: NotificationType
@@ -24,10 +22,10 @@ class NotificationOut(BaseModel):
 
 
 class NotificationPayload(BaseModel):
-    """Serialized delivery schema intended for active real-time WebSocket streams.
+    """Envelope used when forwarding a notification over WebSocket / Pub/Sub.
 
-    Encapsulates payload packets synchronized over Postgres LISTEN/NOTIFY buffers,
-    distributing counters and discrete JSON events to frontend clients.
+    Carries the canonical notification fields plus the recipient's current
+    `unread_count` so the badge in the UI can update in one round trip.
     """
     id: uuid.UUID
     user_id: uuid.UUID

@@ -1,7 +1,7 @@
-"""Ticket commentary discussion thread controller.
+"""Ticket comments endpoints.
 
-Exposes nested API routing patterns nested under parent ticket nodes managing 
-chronological discussion enumerations, discrete comment postings, and selective removals.
+Routes nested under `/tickets/{ticket_ref}/comments` for listing, creating
+and deleting comments attached to a ticket.
 """
 
 import uuid
@@ -16,9 +16,17 @@ router = APIRouter(prefix="/tickets", tags=["Comments"])
 
 
 async def _resolve_ticket_or_raise(db: DB, ticket_ref: str):
-    """Resolves the encompassing parent ticket before executing commentary actions.
+    """Resolve a ticket reference or raise an HTTP error.
 
-    Safeguards routes against malformed input tokens emitting early validation flags.
+    Validates the format of `ticket_ref` (UUID or short number) and loads
+    the parent ticket before any comment operation runs against it.
+
+    Returns:
+        Ticket: The resolved ticket.
+
+    Raises:
+        HTTPException: **422** for malformed references, **404** if the
+            ticket does not exist.
     """
     if not ticket_service.is_valid_ticket_ref(ticket_ref):
         raise HTTPException(
@@ -38,7 +46,11 @@ async def _resolve_ticket_or_raise(db: DB, ticket_ref: str):
     summary="List comments on a ticket",
 )
 async def list_comments(ticket_ref: str, db: DB, current_user: CurrentUser):
-    """Queries the chronologically assembled commentary thread of a resolved ticket."""
+    """Return every comment of the ticket in chronological order.
+
+    Returns:
+        list[CommentOut]: Comments sorted from oldest to newest.
+    """
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     return await comment_service.list_comments(db, ticket.id)
 
@@ -55,7 +67,15 @@ async def create_comment(
     db: DB,
     current_user: CurrentUser,
 ):
-    """Registers fresh structured commentary content into existing incident logs."""
+    """Create a new comment authored by the current user.
+
+    Returns:
+        CommentOut: The persisted comment.
+
+    Raises:
+        HTTPException: **404** if the ticket disappears between the
+            reference check and the service call (race condition guard).
+    """
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
     comment = await comment_service.create_comment(
         db, ticket_id=ticket.id, content=body.content, author=current_user
@@ -76,11 +96,14 @@ async def delete_comment(
     db: DB,
     current_user: CurrentUser,
 ):
-    """Removes active commentary nodes scoped to verifying creators.
+    """Delete a comment. Only its author is authorised.
+
+    On success, notifies subscribers of the parent ticket so their views
+    stay in sync.
 
     Raises:
-        HTTPException (404): Issued when targeted comments do not exist.
-        HTTPException (403): Enforces author-exclusive comment removal barriers.
+        HTTPException: **404** if the comment does not exist.
+        HTTPException: **403** if the caller is not the comment's author.
     """
     ticket = await _resolve_ticket_or_raise(db, ticket_ref)
 
@@ -88,6 +111,8 @@ async def delete_comment(
         db, comment_id=comment_id, actor_id=current_user.id
     )
     if not success:
+        # Why: the service returns False both for "not found" and "forbidden";
+        # disambiguate here so the API responds with the correct status code.
         from sqlalchemy import select
         from app.models.comment import Comment
         exists = (await db.execute(select(Comment).where(Comment.id == comment_id))).scalar_one_or_none()

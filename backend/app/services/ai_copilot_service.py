@@ -1,9 +1,14 @@
-"""AI Technical Support Co-pilot orchestration service.
+"""AI co-pilot service for the support workflow.
 
-Facilitates automatic diagnostic routines, context-enriched reply drafting,
-and solution proposals. Blends real-time ticket attributes, historical thread
-comments, vectorized local knowledge caches (RAG), and direct LLM execution
-with streaming token generator interfaces.
+Orchestrates two LLM-backed features exposed by the ticket API:
+
+- **Diagnosis** — given a ticket, produce a step-by-step suggested fix.
+- **Reply draft** — given a technician's resolution note, write a polished
+  comment ready to be posted on the ticket.
+
+Both features share the same context-building pipeline (ticket details,
+recent comments, RAG over the knowledge base) and the same telemetry
+plumbing (`AIRunTracker`) used to compute cost and token metrics.
 """
 
 import asyncio
@@ -24,9 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _fetch_ticket_and_comments(db: AsyncSession, ticket_id: uuid.UUID):
-    """Concurrently retrieves primary ticket profiles and their recent dialogue logs.
+    """Load the ticket and its 5 most recent comments concurrently.
 
-    Limits historical window to ensure prompt compacting constraints are satisfied.
+    The comment window is capped so the prompt stays within the model's
+    context budget regardless of how chatty the ticket is.
     """
     ticket_task = db.execute(
         select(Ticket)
@@ -45,9 +51,9 @@ async def _fetch_ticket_and_comments(db: AsyncSession, ticket_id: uuid.UUID):
 
 
 def _format_comments(comments: list[Comment]) -> str:
-    """Serializes raw comment entities into a compact formatted prompt context string."""
+    """Render a comment list as a compact `- author: text` block for the prompt."""
     comment_list = [
-        f"- {c.author.display_name if c.author else 'System'}: {c.content}" 
+        f"- {c.author.display_name if c.author else 'System'}: {c.content}"
         for c in reversed(list(comments))
     ]
     return "\n".join(comment_list)
@@ -61,16 +67,21 @@ async def _collect_rag_context(
     *,
     log_prefix: str,
 ) -> str:
-    """Executes concurrent local and global vector searches returning compiled contexts.
+    """Run the global and per-ticket RAG searches in parallel and merge results.
 
-    Tracks hits, misses, and source metadata within optional operational trackers.
+    Two retrievals are issued concurrently: one over the global knowledge
+    base (`k=2`) and one restricted to chunks tagged with this ticket id
+    (typically scraped client web context, `k=3`). Hits, source type and
+    counts are forwarded to the tracker so the AIRun metrics are accurate.
+    Failures degrade gracefully: the function returns a "no information"
+    sentinel instead of raising.
     """
     rag_text = "No specific information found in the knowledge base."
     try:
         global_task = search_with_stats(db, query=search_query, k=2)
         ticket_web_task = search_with_stats(db, query=search_query, k=3, ticket_id=str(ticket_id))
         global_ctx, web_ctx = await asyncio.gather(global_task, ticket_web_task)
-        
+
         all_context = []
         if tracker:
             tracker.record_rag(1, web_ctx.hits, web_ctx.source_type)
@@ -89,7 +100,12 @@ async def _collect_rag_context(
 async def _prepare_diagnosis_context(
     db: AsyncSession, ticket_id: uuid.UUID, tracker: AIRunTracker | None = None
 ):
-    """Assembles instruction blueprints and user context dictionaries for diagnostics."""
+    """Build the system and user prompts used by the diagnosis feature.
+
+    Returns:
+        tuple: `(system_prompt, user_prompt, ticket)` or `(None, None, None)`
+        if the ticket does not exist.
+    """
     ticket, comments = await _fetch_ticket_and_comments(db, ticket_id)
     if not ticket:
         return None, None, None
@@ -136,7 +152,12 @@ async def _prepare_reply_context(
     resolution_note: str,
     tracker: AIRunTracker | None = None,
 ):
-    """Synthesizes professional reply framing prompts incorporating resolution inputs."""
+    """Build the system and user prompts used by the reply-draft feature.
+
+    The technician's `resolution_note` is treated as the primary source of
+    truth; ticket metadata, comments and RAG hits are secondary context
+    used to phrase the draft in a way that fits the conversation.
+    """
     ticket, comments = await _fetch_ticket_and_comments(db, ticket_id)
     if not ticket:
         return None, None, None
@@ -190,9 +211,18 @@ async def get_ticket_diagnosis(
     tracker: AIRunTracker | None = None,
     preferred_provider: str | None = None,
 ) -> str:
-    """Generates a complete, non-streaming diagnostic report for a ticket.
+    """Run a non-streaming diagnosis and return the full text.
 
-    Tracks total execution and prompt costs into the provided telemetry tracker.
+    Args:
+        db: Async SQLAlchemy session.
+        ticket_id: Target ticket id.
+        tracker: Optional metrics tracker — updated with input/output
+            tokens when supplied.
+        preferred_provider: Optional override (`openai` / `google` / `auto`).
+
+    Returns:
+        str: The diagnosis text, or a `"*(Co-pilot internal error: ...)*"`
+        marker if the LLM call fails (the error is also logged).
     """
     try:
         sys_p, user_p, _ = await _prepare_diagnosis_context(db, ticket_id, tracker=tracker)
@@ -220,7 +250,15 @@ async def get_ticket_reply_draft(
     tracker: AIRunTracker | None = None,
     preferred_provider: str | None = None,
 ) -> str:
-    """Produces a fully structured, formal resolution response ready for user validation."""
+    """Generate a reply draft anchored on the technician's resolution note.
+
+    Unlike `get_ticket_diagnosis`, this function **re-raises** on LLM
+    failure so the API layer can convert the error into a 502; the error
+    is also recorded on the tracker before being propagated.
+
+    Returns:
+        str: A stripped, ready-to-post comment body.
+    """
     try:
         sys_p, user_p, _ = await _prepare_reply_context(
             db,
@@ -254,9 +292,16 @@ async def stream_ticket_diagnosis(
     tracker: AIRunTracker | None = None,
     preferred_provider: str | None = None,
 ):
-    """Asynchronous generator yielding sequential diagnosis chunks in real-time.
+    """Yield diagnosis tokens as they are produced by the LLM.
 
-    Leverages dynamic agent stream events registering token completions iteratively.
+    Consumes LangChain's `astream_events` v2 protocol and emits a dict for
+    each chunk so the SSE endpoint can forward them verbatim. Errors are
+    emitted as `{"type": "error", ...}` events instead of raising, so the
+    HTTP stream can terminate cleanly.
+
+    Yields:
+        dict: `{"type": "token", "content": str}` for each token,
+        `{"type": "error", "content": str}` if the model fails.
     """
     try:
         sys_p, user_p, _ = await _prepare_diagnosis_context(db, ticket_id, tracker=tracker)

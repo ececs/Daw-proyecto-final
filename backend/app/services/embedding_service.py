@@ -1,9 +1,10 @@
-"""Google Gemini vector embedding integration provider.
+"""Google Gemini embedding client.
 
-Manages asynchronous HTTP calls to the Google Generative AI API executing high-dimensional
-vector transformations. Configured to yield optimized 768-dimensional arrays using the
-Matryoshka Representation Learning standard (gemini-embedding-2) to optimize PostgreSQL
-index performance and memory layouts.
+Thin async wrapper over Google's `embedContent` REST endpoint. Returns
+768-dimensional vectors (Matryoshka representation) sized to match the
+`pgvector` column declared in the migrations. Returns `None` on any
+failure — callers are expected to degrade gracefully (e.g. fall back to
+keyword search) rather than propagate the error.
 """
 
 import asyncio
@@ -23,16 +24,17 @@ async def generate_embedding(
     text: str,
     task_type: str = "RETRIEVAL_DOCUMENT",
 ) -> Optional[list[float]]:
-    """Generates a 768-dimensional semantic vector array for arbitrary text.
+    """Compute the embedding of `text` using the configured Gemini model.
 
-    Conforms to context size parameters, truncating source inputs to avoid API faults.
-
-    Args:
-        text: Source raw textual content to undergo transformation.
-        task_type: Retrieval intent identifier. Valid: 'RETRIEVAL_DOCUMENT' or 'RETRIEVAL_QUERY'.
+    The input is truncated to 2 000 characters to stay well under the API
+    limits and keep cost bounded. `task_type` should be
+    `"RETRIEVAL_DOCUMENT"` when indexing content and
+    `"RETRIEVAL_QUERY"` when embedding a user query — Gemini optimises
+    the vector differently in each case.
 
     Returns:
-        Optional[list[float]]: Optimized floating-point array if successful, otherwise None.
+        list[float] | None: The 768-dim vector, or `None` when the API
+        key is missing or the request fails (the error is logged at WARN).
     """
     from app.core.config import settings
 
@@ -63,16 +65,10 @@ async def generate_embedding(
 
 
 async def generate_ticket_embedding(title: str, description: Optional[str] = None) -> Optional[list[float]]:
-    """Constructs an specialized semantic vector representing a Ticket record.
-
-    Combines summary titles and structural descriptions into a unified input context.
-
-    Args:
-        title: The foundational subject/title line of the ticket.
-        description: Detailed incident notes describing the issue.
+    """Embed a ticket by concatenating its title and description.
 
     Returns:
-        Optional[list[float]]: Combined semantic embedding vector array.
+        list[float] | None: The combined embedding, or `None` on failure.
     """
     text = title
     if description:

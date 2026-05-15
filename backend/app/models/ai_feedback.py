@@ -1,8 +1,4 @@
-"""AI Agent execution user feedback database model mapping.
-
-Enables active human-in-the-loop learning by allowing users to grade specific
-agent executions with boolean utility toggles and textual annotations.
-"""
+"""User feedback on an AI run (thumbs-up / thumbs-down + optional notes)."""
 
 import uuid
 from datetime import datetime, timezone
@@ -14,11 +10,7 @@ from app.db.base import Base
 
 
 class AIFeedback(Base):
-    """Represents a subjective performance evaluation left by a user on an AI run.
-
-    Applies strict unique constraints ensuring a single feedback record per user per run,
-    facilitating reliable analytics and continuous reinforcement profiling.
-    """
+    """One feedback row per `(ai_run_id, user_id)` (enforced by the unique constraint)."""
 
     __tablename__ = "ai_feedback"
     __table_args__ = (

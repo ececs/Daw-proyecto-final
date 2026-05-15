@@ -1,7 +1,9 @@
-"""Distributed Redis caching and rate-limiting provider.
+"""Redis cache and rate-limit helpers.
 
-Implements a high-performance intermediate storage layer with automatic graceful
-degradation to standalone database execution if the Redis server becomes unreachable.
+Thin wrapper around a single shared `redis.asyncio` client. Every public
+function is a safe no-op when Redis is not configured or temporarily
+unreachable, so the rest of the backend can rely on caching as an
+optimisation rather than a hard dependency.
 """
 
 import json
@@ -14,10 +16,11 @@ _redis: Any = None
 
 
 async def init_cache() -> None:
-    """Establishes an asynchronous TCP connection to the Redis Cache Cluster.
+    """Connect to Redis using `settings.REDIS_URL`.
 
-    Exits silently (no-op) if the cluster connection endpoint configuration
-    remains absent from the system environment settings.
+    Called from the FastAPI startup event. Failure is logged at WARN and
+    leaves `_redis = None`, which makes every subsequent helper a no-op —
+    the application keeps working without caching.
     """
     global _redis
     from app.core.config import settings
@@ -43,7 +46,7 @@ async def init_cache() -> None:
 
 
 async def close_cache() -> None:
-    """Closes existing pool resources releasing the active Redis connection."""
+    """Close the shared Redis client. Called on FastAPI shutdown."""
     global _redis
     if _redis is not None:
         await _redis.aclose()
@@ -51,10 +54,10 @@ async def close_cache() -> None:
 
 
 async def cache_get(key: str) -> Optional[Any]:
-    """Retrieves and deserializes JSON values bound to a string key.
+    """Fetch and JSON-decode the value stored under `key`.
 
     Returns:
-        Optional[Any]: Parsed JSON values if found, otherwise None.
+        The decoded value, or `None` on a miss / error.
     """
     if _redis is None:
         return None
@@ -67,12 +70,10 @@ async def cache_get(key: str) -> Optional[Any]:
 
 
 async def cache_set(key: str, value: Any, ttl: int = 60) -> None:
-    """Serializes and persists an arbitrary value bound to an expiration TTL.
+    """Store `value` under `key` with a TTL of `ttl` seconds.
 
-    Args:
-        key: Primary cache key string identifier.
-        value: The Python object or dictionary to serialize.
-        ttl: Relative time-to-live constraint in seconds.
+    Silently swallows errors — cache failures must never break the
+    request that triggered them.
     """
     if _redis is None:
         return
@@ -83,7 +84,11 @@ async def cache_set(key: str, value: Any, ttl: int = 60) -> None:
 
 
 async def cache_invalidate_prefix(prefix: str) -> None:
-    """Atomically purges keys sharing a common namespace prefix reference."""
+    """Delete every key that starts with `prefix` in a single round trip.
+
+    Used after a mutation to invalidate every cached page of a list
+    endpoint without having to track each individual cache key.
+    """
     if _redis is None:
         return
     try:
@@ -95,17 +100,17 @@ async def cache_invalidate_prefix(prefix: str) -> None:
 
 
 async def is_rate_limited(key: str, limit: int, window: int) -> bool:
-    """Verifies if an identified key exceeds access quotas within a sliding window.
+    """Return `True` if `key` has exceeded `limit` hits within `window` seconds.
 
-    Utilizes a fixed-window counter paradigm leveraging atomic increments.
+    Uses the classic fixed-window counter pattern (atomic `INCR` + first-
+    hit `EXPIRE`). Fixed-window has a known burst flaw at boundary
+    moments but is good enough for protecting the demo login endpoint
+    from naive brute-force.
 
     Args:
-        key: Tracking identifier (e.g., client IP, endpoint name).
-        limit: The maximum requests permitted inside the designated window.
-        window: Time-frame constraint span in seconds.
-
-    Returns:
-        bool: True if the requesting entity has surpassed their threshold.
+        key: Bucket identifier (typically `"<feature>:<client_ip>"`).
+        limit: Maximum hits allowed within the window.
+        window: Window length in seconds.
     """
     if _redis is None:
         return False

@@ -1,8 +1,4 @@
-"""Knowledge Base vector index chunk model mapping.
-
-Manages vectorized partitions of raw external text data (scraped client URLs,
-document indices) ensuring compatibility with semantic similarity searching.
-"""
+"""RAG knowledge base chunk: text plus its pgvector embedding."""
 
 import uuid
 from datetime import datetime, timezone
@@ -23,11 +19,7 @@ except ImportError:
 
 
 class KnowledgeChunk(Base):
-    """Represents a single tokenized chunk of source knowledge stored for RAG retrieval.
-
-    Integrates specialized PostgreSQL vector columns with structured JSON metadata
-    fields, enabling advanced filtering and semantic lookups by the AI Agent.
-    """
+    """One chunk of indexed content (URL page, attachment slice or scraped context)."""
 
     __tablename__ = "knowledge_chunks"
 

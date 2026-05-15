@@ -1,8 +1,10 @@
-"""Asynchronous background URL scrapers and indexers.
+"""Background URL scraping and indexing for ticket client URLs.
 
-Offloads CPU-bound web extraction processes to dedicated threaded execution,
-leveraging trafilatura for optimal noise removal. Persists vector context and distributes
-real-time telemetry notifying users upon scrape finalization.
+When a ticket has a `client_url`, this service downloads the page, runs
+boilerplate-free text extraction (`trafilatura`), embeds the content and
+stores it as a `KnowledgeChunk` tagged with `type="client_web_context"`
+so the RAG pipeline can use it later. Designed to run as a fire-and-
+forget `asyncio.create_task` from the ticket service.
 """
 
 import asyncio
@@ -16,33 +18,44 @@ from app.models.knowledge_chunk import KnowledgeChunk
 
 logger = logging.getLogger(__name__)
 
-async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
-    """Fetches a URL, sanitizes rich HTML layouts, and indexes embeddings as background task.
 
-    Uses asyncio execution wrappers preventing blocking locks on the primary main-loop.
-    Broadcasts localized UI status notifications at analysis start and completion.
+async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
+    """Scrape a URL associated to a ticket and index it as RAG context.
+
+    Steps:
+
+    1. Notify the author/assignee that analysis started (live UI hint).
+    2. Fetch and extract the page text in a thread to avoid blocking the
+       event loop (`trafilatura` is synchronous and CPU-bound).
+    3. Generate the embedding and persist a `KnowledgeChunk`. On the
+       first successful scrape, seed `Ticket.client_summary` with a short
+       snippet so the UI has something to show before the AI is invoked.
+    4. Broadcast a `WEB_SCRAPE_COMPLETED` live event and persist a
+       `rag_indexed` notification for the subscribers.
+
+    Errors are caught and logged: scraping is a best-effort enrichment,
+    never a hard failure for the ticket flow.
 
     Args:
-        ticket_id: Target ticket reference UUID for contextual binding.
-        url: Remote client HTTP address to crawl and process.
+        ticket_id: Ticket the scraped content belongs to.
+        url: Remote URL to crawl.
     """
     logger.info(f"Scraping Service: Starting analysis for ticket {ticket_id} -> {url}")
-    
-    # Notify that analysis has started
+
     try:
         async with async_session_factory() as db:
             from app.models.ticket import Ticket
             from sqlalchemy import select
             ticket_res = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
             ticket = ticket_res.scalar_one_or_none()
-            
+
             if ticket:
                 from app.services.notification_service import broadcast_live_update
                 from app.schemas.websocket import WSMessageType
                 users_to_notify = {ticket.author_id}
                 if ticket.assignee_id:
                     users_to_notify.add(ticket.assignee_id)
-                
+
                 for uid in users_to_notify:
                     await broadcast_live_update(
                         user_id=uid,
@@ -52,33 +65,32 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
                     )
     except Exception as e:
         logger.warning(f"Failed to send start notification: {e}")
-    
+
     try:
-        # 1. Download and extract text (Offloaded to a thread to avoid blocking)
+        # Why: `trafilatura` calls are synchronous; offloading them to a
+        # thread keeps the event loop free for concurrent requests.
         downloaded = await asyncio.to_thread(trafilatura.fetch_url, url)
         if not downloaded:
             logger.error(f"Scraping Service: Failed to fetch URL {url}")
             return
-            
+
         text = await asyncio.to_thread(trafilatura.extract, downloaded)
         if not text:
             logger.error(f"Scraping Service: No meaningful text found in {url}")
             return
-            
-        # 2. Content Preparation
-        content = text[:4000] 
-        
-        # 3. Generate embedding
+
+        # Why: cap the indexed content to keep both the embedding cost
+        # and the persisted row size bounded.
+        content = text[:4000]
+
         from app.services.embedding_service import generate_embedding
         embedding = await generate_embedding(content, task_type="RETRIEVAL_DOCUMENT")
-        
+
         if embedding is None:
             logger.warning(f"Scraping Service: Could not generate embedding for {url}")
             return
 
-        # 4. Persistence
         async with async_session_factory() as db:
-            # 4.1 Save to Knowledge base (RAG)
             chunk = KnowledgeChunk(
                 url=url,
                 chunk_index=0,
@@ -92,7 +104,8 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
             )
             db.add(chunk)
 
-            # 4.2 Seed client_summary on first scrape only
+            # Why: only seed `client_summary` the *first* time so manual
+            # edits made later by a human are never overwritten.
             from app.models.ticket import Ticket
             from sqlalchemy import select
             ticket_res = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
@@ -103,8 +116,7 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
                 ticket.client_summary = snippet
 
             await db.commit()
-            
-        # 5. Notify via WebSocket (Live UI update) + persist notification
+
         if ticket:
             from app.services.notification_service import (
                 broadcast_live_update,
@@ -132,8 +144,8 @@ async def scrape_and_index_url(ticket_id: uuid.UUID, url: str) -> None:
                     assignee_id=ticket.assignee_id,
                     message=f'Website indexed for RAG: {url}',
                 )
-            
+
         logger.info(f"Scraping Service: Successfully indexed web context for ticket {ticket_id}")
-        
+
     except Exception as e:
         logger.error(f"Scraping Service: Critical error for ticket {ticket_id}: {str(e)}", exc_info=True)

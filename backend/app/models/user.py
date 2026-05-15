@@ -16,10 +16,11 @@ from app.db.base import Base
 
 
 class User(Base):
-    """Represents an authenticated user entity in the system.
+    """Authenticated user record.
 
-    Acts as the parent record for tickets and comments. Mapped identities are
-    bootstrapped dynamically upon initial OAuth successful handshakes.
+    Rows are upserted by the OAuth callback the first time a user logs
+    in; there is no manual registration flow. `email` is the natural
+    identity (Google emails are stable across re-logins).
     """
 
     __tablename__ = "users"
@@ -41,9 +42,5 @@ class User(Base):
 
     @property
     def display_name(self) -> str:
-        """Retrieves the primary string representation for the user.
-
-        Returns:
-            str: The user's display name, falling back to email if not provided.
-        """
+        """Return `name`, falling back to `email`, then to a sentinel string."""
         return self.name or self.email or "Unknown User"

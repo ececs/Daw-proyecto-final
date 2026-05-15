@@ -1,8 +1,13 @@
-"""RAG knowledge base pipeline and semantic ingestion service.
+"""Knowledge base / RAG pipeline service.
 
-Implements standard content chunking, multi-format attachment extraction, and vector-space
-distance lookups using pgvector operators. Manages text extraction from binary file uploads
-including PDFs, Microsoft Word documents, and plain text assets.
+Three responsibilities:
+
+- **Ingest** content (URLs, PDFs, DOCX, plain text) into `KnowledgeChunk`
+  rows together with their pgvector embeddings.
+- **Search** chunks by cosine similarity, with an `ILIKE` fallback when
+  the embedding provider is unavailable.
+- **Maintain** the index (idempotent reingest, chunk deletion when an
+  attachment is removed or its RAG flag is turned off).
 """
 
 import asyncio
@@ -25,20 +30,27 @@ CHUNK_OVERLAP = 50
 
 @dataclass
 class KnowledgeSearchStats:
-    """Data container tracking quantitative outcomes returned by vector searches."""
+    """Result wrapper carrying the matched chunks and a source-type tag.
+
+    `source_type` is used by `AIRunTracker.record_rag` to classify where
+    the context came from (`"web"`, `"attachment"`, `"global"`, ...).
+    """
     chunks: list[KnowledgeChunk]
     source_type: str
 
     @property
     def hits(self) -> int:
-        """Measures the discrete number of valid semantic chunks returned."""
+        """Number of chunks returned by the search."""
         return len(self.chunks)
 
 
 def _chunk_text(text: str) -> list[str]:
-    """Splits source text arrays into normalized spans utilizing a static overlap boundary.
+    """Split text into paragraph-aware chunks of at most `CHUNK_SIZE` chars.
 
-    Optimized to divide first along paragraph line-breaks before executing hard truncation.
+    Prefers paragraph (`\\n\\n`) boundaries; when a single paragraph is
+    larger than the budget, it is hard-cut with `CHUNK_OVERLAP` characters
+    of overlap between consecutive pieces to avoid losing context at the
+    seam.
     """
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     chunks: list[str] = []
@@ -62,12 +74,16 @@ def _chunk_text(text: str) -> list[str]:
 
 
 async def ingest_url(db: AsyncSession, url: str) -> dict:
-    """Fetches HTML pages, applies paragraph chunking, embeds, and saves to PostgreSQL.
+    """Fetch a URL, extract its main text and index it as RAG chunks.
 
-    Operates idempotently, purging stale historical chunks sharing identical target URLs.
+    Uses `trafilatura` for boilerplate-free text extraction. The operation
+    is idempotent: any previous chunks for the same URL are deleted before
+    the new ones are inserted, so re-ingesting always reflects the latest
+    snapshot.
 
     Raises:
-        ValueError: If URL fetch yields zero content or network-level faults occur.
+        ValueError: If the URL cannot be fetched, no extractable text is
+            found, or the chunker produces zero chunks.
     """
     import trafilatura
 
@@ -111,9 +127,14 @@ async def ingest_url(db: AsyncSession, url: str) -> dict:
 
 
 def _extract_text(content: bytes, mime_type: str) -> str:
-    """Dispatches specific binary bytes parsers mapping incoming MIME standards.
+    """Extract plain text from a binary attachment based on its MIME type.
 
-    Currently parses PDF (pypdf), DOCX (python-docx), and TXT (UTF-8 codec).
+    Supported types: `application/pdf` (via `pypdf`), `text/plain`
+    (UTF-8 decode), and `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
+    (DOCX, via `python-docx`).
+
+    Raises:
+        ValueError: For unsupported MIME types.
     """
     if mime_type == "application/pdf":
         import io
@@ -142,9 +163,12 @@ async def ingest_attachment(
     content: bytes,
     mime_type: str,
 ) -> dict:
-    """Parses uploaded file byte contents into vectorized knowledge indexes.
+    """Extract, chunk and index the text content of a ticket attachment.
 
-    Synthesizes stable artificial URLs identifying attachment-owned chunk groups.
+    Chunks are tagged with `chunk_metadata` (`ticket_id`, `attachment_id`,
+    `type="attachment"`) so the search side can scope retrieval. The
+    synthetic URL `attachment:<id>` acts as a stable identifier for
+    re-ingestion / deletion.
     """
     text = _extract_text(content, mime_type)
     if not text:
@@ -179,23 +203,24 @@ async def ingest_attachment(
 
 
 async def delete_attachment_chunks(db: AsyncSession, attachment_id: str) -> None:
-    """Deletes all indexed vector fragments mapped to a single attachment file."""
+    """Delete every chunk indexed for the given attachment id."""
     synthetic_url = f"attachment:{attachment_id}"
     await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.url == synthetic_url))
     await db.commit()
 
 
 async def search(db: AsyncSession, query: str, k: int = 5, ticket_id: Optional[str] = None) -> list[str]:
-    """Recover Top-K textual excerpts bearing the highest similarity proximity to queries.
+    """Return the top-K chunk texts matching `query`.
 
-    Delegates search processes to specialized tracking functions.
+    Thin wrapper around `search_with_stats` for callers that only need the
+    raw content strings.
     """
     stats = await search_with_stats(db, query=query, k=k, ticket_id=ticket_id)
     return [row.content for row in stats.chunks]
 
 
 def _apply_ticket_filter(stmt, ticket_id: Optional[str]):
-    """Appends localized context filtering leveraging PostgreSQL's native JSONB paths."""
+    """Narrow a chunk-search statement to the chunks tagged with `ticket_id`."""
     if ticket_id:
         from sqlalchemy import func
         stmt = stmt.where(func.json_extract_path_text(KnowledgeChunk.chunk_metadata, "ticket_id") == str(ticket_id))
@@ -203,7 +228,11 @@ def _apply_ticket_filter(stmt, ticket_id: Optional[str]):
 
 
 def _detect_source_type(chunks: list[KnowledgeChunk]) -> str:
-    """Identifies categorical metadata footprints to track active vector sources."""
+    """Classify a list of chunks by their origin metadata.
+
+    Returns one of `"none"`, `"web"`, `"attachment"`, `"global"` or
+    `"mixed"` so the metrics layer can attribute RAG hits to a source.
+    """
     types = set()
     for chunk in chunks:
         metadata = chunk.chunk_metadata or {}
@@ -224,12 +253,14 @@ def _detect_source_type(chunks: list[KnowledgeChunk]) -> str:
 async def search_with_stats(
     db: AsyncSession, query: str, k: int = 5, ticket_id: Optional[str] = None
 ) -> KnowledgeSearchStats:
-    """Executes vectorized pgvector similarity search or falls back to ILIKE matching.
+    """Run a semantic (pgvector) search with an `ILIKE` fallback.
 
-    Determines the optimal path based on live embedding API operational availability.
+    If the embedding provider returns `None` (e.g. it is rate-limited or
+    not configured), the function still produces useful results via a
+    keyword `ILIKE` query, at the cost of recall.
 
     Returns:
-        KnowledgeSearchStats: Enriched statistics container summarizing search metadata.
+        KnowledgeSearchStats: Matched chunks plus the inferred source type.
     """
     query_embedding = await generate_embedding(query, task_type="RETRIEVAL_QUERY")
 

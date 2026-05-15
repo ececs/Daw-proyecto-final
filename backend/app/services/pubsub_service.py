@@ -1,9 +1,9 @@
-"""Real-time horizontal Pub/Sub distribution layer.
+"""Redis Pub/Sub fan-out for WebSocket events.
 
-Multiplexes distributed real-time WebSocket notifications across horizontally
-scaled API instances. Implements primary delivery via Redis channels,
-gracefully reverting back to single-instance Postgres LISTEN/NOTIFY protocols
-when operating in isolated staging/development topologies.
+Bridges the Redis channel that backend replicas use to share real-time
+events with the in-process `WebSocketManager`. The publish side is
+called from the notification service; the listen side runs as a single
+background task started during application startup.
 """
 
 import asyncio
@@ -17,13 +17,11 @@ CHANNEL = "notifications"
 
 
 async def publish(payload: dict) -> None:
-    """Publishes dynamic JSON envelopes to the designated distribution network.
+    """Publish a WebSocket event payload to the shared Redis channel.
 
-    Prioritizes distributed cluster publishing; seamlessly routes to Postgres
-    listener functions if standalone fallbacks are active.
-
-    Args:
-        payload: Content dictionary mapping properties of a valid NotificationPayload.
+    When Redis is unavailable the caller (`notification_service`) is
+    expected to fall back to `pg_notify`; this function only attempts the
+    Redis path.
     """
     from app.services.cache_service import _redis
 
@@ -40,11 +38,12 @@ async def publish(payload: dict) -> None:
 
 
 async def redis_listen_loop() -> None:
-    """Background asynchronous daemon subscribing to real-time network events.
+    """Subscribe to the Redis channel and dispatch messages to local sockets.
 
-    Listens to global Redis notifications streams, extracting contextual
-    user identifiers before dispatching structured messages down individual
-    client WebSocket manager tunnels.
+    Each message carries a `user_id`; when it equals `"*"` the event is
+    broadcast to every connected socket, otherwise it is routed to the
+    specific user. The loop survives transient Redis errors and exits
+    cleanly on `CancelledError` (FastAPI shutdown).
     """
     from app.services.cache_service import _redis
     from app.core.websocket_manager import manager
@@ -66,7 +65,7 @@ async def redis_listen_loop() -> None:
                 user_id = raw_data.pop("user_id", None)
                 if not user_id:
                     continue
-                
+
                 from app.schemas.websocket import WSMessage
                 ws_msg = WSMessage(**raw_data)
                 if user_id == "*":
@@ -88,6 +87,6 @@ async def redis_listen_loop() -> None:
 
 
 def is_redis_available() -> bool:
-    """Verifies runtime Redis client availability to determine active transport layers."""
+    """Return `True` if the shared Redis client is connected."""
     from app.services.cache_service import _redis
     return _redis is not None

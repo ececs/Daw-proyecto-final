@@ -1,7 +1,8 @@
-"""Knowledge Ingestion API endpoint layer.
+"""Knowledge-base ingestion endpoints.
 
-Exposes routes triggering advanced distributed web scraping routines and Matryoshka
-vector mapping pipelines supporting dynamic RAG context availability.
+Entry point for adding external web pages to the RAG knowledge store. The
+URL is fetched, parsed, split into chunks, embedded and persisted as
+`KnowledgeChunk` rows so the AI copilot can retrieve them at query time.
 """
 
 from fastapi import APIRouter, HTTPException, status
@@ -19,21 +20,23 @@ router = APIRouter(prefix="/knowledge", tags=["Knowledge"])
     summary="Ingest a URL into the AI knowledge base",
 )
 async def ingest_url(body: IngestRequest, db: DB, current_user: CurrentUser):
-    """Parses and vectorizes remote web content injecting chunks into the RAG store.
+    """Scrape a URL and index its content into the RAG knowledge base.
 
-    Fires synchronous extraction routines creating searchable dimensional arrays
-    ready for localized cosine distance querying.
+    Delegates to `knowledge_service.ingest_url`, which validates the URL
+    against the domain allow-list, fetches and cleans the HTML, chunks the
+    text and persists embeddings for every chunk.
 
     Args:
-        body: Schema validating incoming crawling target constraints.
-        db: Active asynchronous database transactional handler.
-        current_user: Injected token session identifying current operator identity.
-
-    Raises:
-        HTTPException (422): Emitted upon domain blacklist matches or parsing failures.
+        body: Request payload carrying the target URL.
+        db: Async SQLAlchemy session.
+        current_user: Authenticated requester.
 
     Returns:
-        IngestResponse: Summary object defining chunks written and metadata parsed.
+        IngestResponse: Number of chunks indexed and metadata of the source.
+
+    Raises:
+        HTTPException: **422** if the URL is rejected (blocked domain,
+            parsing failure, etc.).
     """
     try:
         return await knowledge_service.ingest_url(db, str(body.url))

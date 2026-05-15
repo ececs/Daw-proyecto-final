@@ -1,8 +1,10 @@
-"""Asynchronous database session management.
+"""Async SQLAlchemy engine, session factory and FastAPI dependency.
 
-Configures the core SQLAlchemy async engine with customized connection pooling
-strategies and exports session factories for dependency injection and manual session
-contexts.
+The engine is configured with a small pool (`pool_size=5`,
+`max_overflow=10`) tuned for a single uvicorn worker; production setups
+with multiple workers should still fit within typical PostgreSQL
+defaults. `expire_on_commit=False` keeps ORM instances usable after a
+commit, which the service layer relies on when broadcasting events.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -19,19 +21,18 @@ engine = create_async_engine(
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
-# Alias for services that expect a factory naming pattern (Senior Pattern)
+# Alias: some services use the more conventional `_factory` name.
 async_session_factory = AsyncSessionLocal
 
 
-
 async def get_db() -> AsyncSession:
-    """Generates an asynchronous database session context.
+    """FastAPI dependency that yields a fresh `AsyncSession` per request.
 
-    Intended to be utilized as a FastAPI dependency. Yields an open session to
-    the calling handler and automatically closes it when the context exits.
+    The session is closed automatically when the request finishes,
+    rolling back any uncommitted state.
 
     Yields:
-        AsyncSession: An active asynchronous database connection session.
+        AsyncSession: The active session.
     """
     async with AsyncSessionLocal() as session:
         yield session

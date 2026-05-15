@@ -1,8 +1,9 @@
-"""Threaded commentary and ticket discussion management service.
+"""Comment service.
 
-Orchestrates commenting lifecycles including creation, contextual listing,
-and secure actor-restricted deletions. Automatically dispatches transactional
-notifications to related actors upon successful persistence.
+CRUD on the `Comment` aggregate with the associated notification fan-out:
+when a comment is created, both the ticket author and the assignee
+receive a personal notification and a `TICKET_UPDATED` event is
+broadcast so other clients refresh the conversation view.
 """
 
 import uuid
@@ -19,14 +20,14 @@ from app.services import notification_service
 
 
 async def list_comments(db: AsyncSession, ticket_id: uuid.UUID) -> List[CommentOut]:
-    """Recovers a chronological sequence of comments linked to a specific ticket.
+    """Return every comment of a ticket ordered from oldest to newest.
 
     Args:
-        db: Active asynchronous SQLAlchemy transactional database session.
-        ticket_id: The UUID key of the parent ticket being retrieved.
+        db: Async SQLAlchemy session.
+        ticket_id: Parent ticket primary key.
 
     Returns:
-        List[CommentOut]: Collection of serialized comments sorted by creation date.
+        list[CommentOut]: Comments with their author eager-loaded.
     """
     result = await db.execute(
         select(Comment)
@@ -44,29 +45,30 @@ async def create_comment(
     content: str,
     author: User,
 ) -> Optional[CommentOut]:
-    """Creates a comment, persists it, and triggers side-effect notification flows.
+    """Create a comment on a ticket and fan out the associated events.
 
-    Verifies ticket existence, records transaction, dispatches real-time user
-    notifications, and broadcasts update signals to frontend WebSocket clients.
+    Performs an existence check on the parent ticket, persists the
+    comment, notifies subscribers (author + assignee), broadcasts a
+    `TICKET_UPDATED` event for the UI, and finally returns the comment
+    re-fetched with its `author` relation eager-loaded so the response
+    schema validates without extra round trips.
 
     Args:
-        db: Active asynchronous SQLAlchemy database session.
-        ticket_id: UUID of the parent ticket.
-        content: Raw text body of the commentary record.
-        author: The User model representing the active commenter.
+        db: Async SQLAlchemy session.
+        ticket_id: Parent ticket primary key.
+        content: Comment body.
+        author: User authoring the comment.
 
     Returns:
-        Optional[CommentOut]: Validated output schema representation of new comment,
-                              or None if the referenced parent ticket does not exist.
+        CommentOut | None: The persisted comment, or `None` if the parent
+        ticket does not exist.
     """
-    # 1. Verify ticket existence (needed for notification logic)
     ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = ticket_result.scalar_one_or_none()
-    
+
     if not ticket:
         return None
 
-    # 2. Create model
     comment = Comment(
         ticket_id=ticket_id,
         author_id=author.id,
@@ -75,17 +77,16 @@ async def create_comment(
     db.add(comment)
     await db.flush()
 
-    # 3. Trigger side effects
     await notification_service.notify_comment_added(
         db, ticket=ticket, commenter=author
     )
-    # Broadcaster global update to refresh UI
     await notification_service.notify_ticket_updated(db, ticket=ticket, actor=author)
 
-    # 4. Finalize
     await db.commit()
-    
-    # 5. Re-fetch with author relation for the schema
+
+    # Why: re-fetch with `selectinload(Comment.author)` so the Pydantic
+    # response schema can serialize the author without lazy-loading on
+    # an already-closed transaction.
     result = await db.execute(
         select(Comment)
         .options(selectinload(Comment.author))  # type: ignore[attr-defined]
@@ -99,19 +100,16 @@ async def delete_comment(
     comment_id: uuid.UUID,
     actor_id: uuid.UUID,
 ) -> bool:
-    """Deletes a comment ensuring restricting operations strictly to the original author.
-
-    Args:
-        db: Active asynchronous SQLAlchemy database session.
-        comment_id: Unique identifier of the target comment.
-        actor_id: The unique UUID belonging to the attempting user.
+    """Delete a comment if the actor is its author.
 
     Returns:
-        bool: True if deleted successfully, False if missing or unauthorized.
+        bool: `True` on success; `False` if the comment does not exist or
+        the actor is not its author. The router layer is responsible for
+        translating `False` into the appropriate 404 vs. 403 status.
     """
     result = await db.execute(select(Comment).where(Comment.id == comment_id))
     comment = result.scalar_one_or_none()
-    
+
     if not comment or comment.author_id != actor_id:
         return False
 

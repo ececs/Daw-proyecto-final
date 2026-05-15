@@ -1,7 +1,4 @@
-"""S3 cloud storage file attachment schemas.
-
-Defines metadata payloads for tracking system-wide asset distributions.
-"""
+"""Pydantic schemas for attachments."""
 
 import uuid
 from datetime import datetime
@@ -9,11 +6,7 @@ from pydantic import BaseModel
 
 
 class AttachmentOut(BaseModel):
-    """Serialized output schema reflecting a persistent cloud storage asset.
-
-    Maps localized metadata containing bucket IDs, content keys, size limits,
-    and runtime presigned download addresses.
-    """
+    """Response shape for attachment metadata, including a presigned download URL."""
     id: uuid.UUID
     ticket_id: uuid.UUID
     uploader_id: uuid.UUID

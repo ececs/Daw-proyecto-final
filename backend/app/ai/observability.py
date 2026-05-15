@@ -1,11 +1,14 @@
-"""In-memory thread-safe AI observability telemetry store.
+"""In-memory AI observability counters.
 
-Tracks provider, active model, fallback availability, last error, and a
-cumulative tool-action counter. State resets on process restart — this is
-intentional: the goal is operational visibility of the current run, not
-long-term analytics.
+Process-local snapshot of the AI subsystem: provider/model in use,
+fallback availability, last error, cumulative counters (chat, diagnosis,
+tool actions, RAG queries) and a rolling average latency. The state is
+intentionally non-persistent — it answers "what is happening right now?"
+not "what happened last week?". Long-term analytics live in the
+`AIRun`/`AIFeedback` tables instead.
 
-Thread-safe via a threading.Lock (uvicorn workers share one process in dev).
+Thread-safe via a single `threading.Lock`; safe to call from any thread
+or task inside the uvicorn worker.
 """
 
 import threading
@@ -16,19 +19,18 @@ from typing import Optional
 
 @dataclass
 class _AIState:
-    """Encapsulates core operational usage metrics in a memory structure."""
+    """Mutable bag of counters protected by `_lock`."""
     provider: str = "unknown"
     model: str = "unknown"
     fallback_available: bool = False
     fallback_model: Optional[str] = None
     last_error: Optional[str] = None
     last_error_at: Optional[str] = None
-    # Usage counters — reset on process restart
-    action_count: int = 0       # agent tool executions
-    chat_count: int = 0         # /ai/chat POST requests
-    diagnoses_count: int = 0    # AI copilot diagnoses streamed
-    rag_queries_count: int = 0  # search_knowledge tool calls
-    rag_hits_count: int = 0     # searches that returned ≥1 chunk
+    action_count: int = 0
+    chat_count: int = 0
+    diagnoses_count: int = 0
+    rag_queries_count: int = 0
+    rag_hits_count: int = 0
     fallback_count: int = 0
     success_count: int = 0
     error_count: int = 0
@@ -50,14 +52,7 @@ def configure(
     fallback_available: bool,
     fallback_model: Optional[str] = None,
 ) -> None:
-    """Registers static deployment info for the active AI provider engine.
-
-    Args:
-        provider: String ID representing the primary provider.
-        model: The primary LLM deployment model identifier.
-        fallback_available: Flag denoting if a secondary LLM model is active.
-        fallback_model: String name of the optional fallback LLM.
-    """
+    """Record the active provider/model pair. Called by `_build_llm`."""
     with _lock:
         _state.provider = provider
         _state.model = model
@@ -66,31 +61,27 @@ def configure(
 
 
 def increment_action() -> None:
-    """Increments the cumulative counter tracking discrete agent tool executions."""
+    """Count one successful agent tool execution."""
     with _lock:
         _state.action_count += 1
 
 
 def increment_chat() -> None:
-    """Tracks the arrival of an incoming chat endpoint message execution."""
+    """Count one incoming `POST /ai/chat` request."""
     with _lock:
         _state.chat_count += 1
         _state.last_surface = "chat"
 
 
 def increment_diagnosis() -> None:
-    """Registers the bootstrap initiation of a streaming ticket diagnostic run."""
+    """Count one streaming diagnosis run."""
     with _lock:
         _state.diagnoses_count += 1
         _state.last_surface = "diagnosis"
 
 
 def increment_rag_query(had_results: bool) -> None:
-    """Captures executing knowledge base queries assessing retrieval hit yields.
-
-    Args:
-        had_results: Denotes whether the executed query returned documents.
-    """
+    """Count one RAG search; mark it as a hit when at least one chunk was returned."""
     with _lock:
         _state.rag_queries_count += 1
         if had_results:
@@ -98,13 +89,7 @@ def increment_rag_query(had_results: bool) -> None:
 
 
 def record_rag(queries: int, hits: int, source: str) -> None:
-    """Aggregates batch RAG execution counters reflecting multiple retrieval passes.
-
-    Args:
-        queries: The number of sequential search queries triggered.
-        hits: Combined count of queries successfully resolving context docs.
-        source: String describing provenance (e.g., URL list, attachment key).
-    """
+    """Accumulate the RAG counters of an entire AIRun in one call."""
     with _lock:
         _state.rag_queries_count += max(0, queries)
         _state.rag_hits_count += max(0, hits)
@@ -112,19 +97,13 @@ def record_rag(queries: int, hits: int, source: str) -> None:
 
 
 def record_fallback() -> None:
-    """Records an instance of the agent recovering through secondary fallback invocation."""
+    """Count one transparent fallback to the secondary provider."""
     with _lock:
         _state.fallback_count += 1
 
 
 def record_success(surface: str, latency_ms: Optional[int], rag_source: Optional[str] = None) -> None:
-    """Logs a completed successfully agent execution calculating rolling latencies.
-
-    Args:
-        surface: Identifier mapping endpoint origin ('chat', 'diagnosis').
-        latency_ms: Total duration in milliseconds to process requests.
-        rag_source: String origin identification for referenced knowledge.
-    """
+    """Mark an AIRun as successful and update the rolling latency average."""
     with _lock:
         _state.success_count += 1
         _state.last_surface = surface
@@ -138,11 +117,11 @@ def record_success(surface: str, latency_ms: Optional[int], rag_source: Optional
 
 
 def record_error(message: str, surface: Optional[str] = None) -> None:
-    """Stores failure logs attaching sanitized stack trace snippets and timestamps.
+    """Record a failure together with the surface that triggered it.
 
-    Args:
-        message: Raw exception or error message to capture.
-        surface: Origin triggering context string identity.
+    The message is truncated to 300 characters to keep the in-memory
+    state bounded; the full stack trace is logged separately by the
+    caller.
     """
     with _lock:
         _state.error_count += 1
@@ -153,11 +132,7 @@ def record_error(message: str, surface: Optional[str] = None) -> None:
 
 
 def get_status() -> dict:
-    """Generates a point-in-time dictionary serialization of all live telemetry.
-
-    Returns:
-        dict: Operational health map describing provider health and active usage.
-    """
+    """Return a snapshot of the current observability state as a plain dict."""
     with _lock:
         return {
             "provider": _state.provider,

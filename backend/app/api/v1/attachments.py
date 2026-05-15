@@ -1,8 +1,9 @@
-"""File storage attachment controller API.
+"""Ticket attachments endpoints.
 
-Coordinates secure payload uploads, metadata listings, and object deletions.
-Validates binary constraints including maximum file footprints (MB) and allowed
-mime-type whitelist configurations.
+Routes nested under `/tickets/{ticket_ref}/attachments` for uploading,
+listing, deleting and toggling the RAG-indexing flag of files attached to
+a ticket. Enforces size and MIME-type limits configured in
+`app.core.config.settings`.
 """
 
 import uuid
@@ -26,10 +27,14 @@ MAX_BYTES = settings.MAX_ATTACHMENT_SIZE_MB * 1024 * 1024
     summary="List attachments for a ticket",
 )
 async def list_attachments(ticket_ref: str, db: DB, current_user: CurrentUser):
-    """Lists file assets belonging to referenced ticket entities.
+    """Return every attachment of the ticket.
+
+    Returns:
+        list[AttachmentOut]: Attachment metadata (file content is fetched
+        separately via the storage URL).
 
     Raises:
-        HTTPException (404): Emitted when invalid ticket identifiers are targeted.
+        HTTPException: **404** if the ticket does not exist.
     """
     ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
@@ -49,14 +54,21 @@ async def upload_attachment(
     db: DB,
     current_user: CurrentUser,
 ):
-    """Streams user binary uploads directly to persistent bucket storage instances.
+    """Upload a file and attach it to the ticket.
 
-    Applies strict validation filters regarding raw content dimensions and mime classes
-    prior to executing secondary service pushes.
+    Validates the binary against the configured size limit
+    (`MAX_ATTACHMENT_SIZE_MB`) and MIME-type allow-list **before** any
+    persistence happens, so rejected uploads never touch storage. On
+    success, broadcasts a `TICKET_UPDATED` WebSocket event so connected
+    clients refresh the attachment list.
+
+    Returns:
+        AttachmentOut: Metadata of the persisted attachment.
 
     Raises:
-        HTTPException (413): Triggered upon files exceeding maximum size ceilings.
-        HTTPException (415): Emitted upon unauthorized binary content classes.
+        HTTPException: **413** if the file exceeds the size limit.
+        HTTPException: **415** if the MIME type is not allowed.
+        HTTPException: **404** if the ticket does not exist.
     """
     content = await file.read()
 
@@ -110,13 +122,11 @@ async def delete_attachment(
     db: DB,
     current_user: CurrentUser,
 ):
-    """Destroys specific persistent storage assets tied to validated ticket nodes.
-
-    Restricts execution authorization verifying direct file ownership bounds.
+    """Delete an attachment. Only its uploader is authorised.
 
     Raises:
-        HTTPException (404): When referenced attachments do not exist.
-        HTTPException (403): Upon foreign asset destruction attempts.
+        HTTPException: **404** if the attachment does not exist.
+        HTTPException: **403** if the caller is not the uploader.
     """
     ticket = await ticket_service.resolve_ticket(db, ticket_ref)
     if not ticket:
@@ -126,6 +136,8 @@ async def delete_attachment(
         db, attachment_id=attachment_id, actor_id=current_user.id
     )
     if not success:
+        # Why: the service returns False both for "not found" and "forbidden";
+        # disambiguate here so the API responds with the correct status code.
         from sqlalchemy import select
         from app.models.attachment import Attachment
         exists = (await db.execute(select(Attachment).where(Attachment.id == attachment_id))).scalar_one_or_none()
@@ -152,7 +164,18 @@ async def toggle_attachment_rag(
     db: DB,
     current_user: CurrentUser,
 ):
-    """Updates indexing inclusion state triggers for target binary attachments."""
+    """Toggle whether an attachment is indexed by the RAG pipeline.
+
+    When `use_for_rag` is true, the file content will be chunked and
+    embedded so the AI copilot can cite it; when false, it is ignored by
+    the retrieval layer (but still accessible to humans).
+
+    Returns:
+        AttachmentOut: The updated attachment.
+
+    Raises:
+        HTTPException: **404** if the attachment does not exist.
+    """
     attachment = await attachment_service.update_attachment_rag(
         db, attachment_id=attachment_id, use_for_rag=use_for_rag
     )

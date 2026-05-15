@@ -139,7 +139,7 @@ describe("useWebSocket", () => {
     });
 
     expect(storeActions.triggerRefresh).toHaveBeenCalledWith("ticket-4");
-    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Análisis Web Finalizado" }));
+    expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Web analysis finished" }));
 
     act(() => {
       socket.onclose?.({ code: 1006, reason: "network" } as CloseEvent);

@@ -32,21 +32,14 @@ class Settings(BaseSettings):
     @field_validator("SECRET_KEY")
     @classmethod
     def _require_strong_secret(cls, v: str) -> str:
-        """Enforces cryptographic strength requirements for the JWT secret key.
+        """Refuse to boot in production with the placeholder secret.
 
-        Ensures the default key is overridden when executing in a production context
-        (e.g., deployment via Railway). This safeguard prevents accidental deployments
-        using unsecured placeholder credentials.
-
-        Args:
-            v: The configured secret key string value.
-
-        Returns:
-            str: The validated secret key.
+        Production is detected via `RAILWAY_ENVIRONMENT_NAME` or
+        `ENV=production`. Locally the default value is allowed so
+        `docker compose up` keeps working out of the box.
 
         Raises:
-            ValueError: If the default placeholder secret is detected in a production
-                environment.
+            ValueError: If the default placeholder is used in production.
         """
         import os
         in_production = bool(
@@ -78,16 +71,10 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: Any) -> list[str]:
-        """Parses and sanitizes comma-separated CORS origin strings.
+        """Accept either a list or a comma-separated string for CORS_ORIGINS.
 
-        Allows feeding a single string of comma-separated values from environment variables
-        directly into the list-based CORS validation layer.
-
-        Args:
-            v: Either a list of domains or a raw comma-separated string.
-
-        Returns:
-            list[str]: A list of stripped, valid origin domains.
+        Environment variables are strings, so the deployment platform can
+        pass `"https://a.com,https://b.com"` directly.
         """
         if isinstance(v, str):
             return [i.strip() for i in v.split(",") if i.strip()]
@@ -103,17 +90,10 @@ class Settings(BaseSettings):
     @field_validator("ALLOWED_EMAILS", mode="before")
     @classmethod
     def parse_allowed_emails(cls, v: Any) -> list[str]:
-        """Resolves incoming email authorization rules into a structured list.
+        """Parse `ALLOWED_EMAILS` from a list, a JSON array or a CSV string.
 
-        Handles raw strings containing JSON arrays or comma-separated emails/domains,
-        facilitating integration with cloud environment variables. Defaults to wildcards
-        if empty configurations are passed.
-
-        Args:
-            v: Raw email authorization payload from system settings.
-
-        Returns:
-            list[str]: Evaluated list of authorized emails or wildcard rules.
+        Empty strings collapse to `["*"]` (allow everyone) so a missing
+        env var does not lock the dev environment out by accident.
         """
         if isinstance(v, str):
             v = v.strip()

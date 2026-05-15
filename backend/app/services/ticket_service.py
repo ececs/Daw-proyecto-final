@@ -1,8 +1,10 @@
-"""Core incident management and ticketing lifecycle controller.
+"""Ticket business logic.
 
-Encapsulates atomic operations spanning ticket registration, status migrations,
-and state tracking. Integrates specialized Reciprocal Rank Fusion search algorithms,
-synchronous cache synchronization, and background embedding task dispatchers.
+Owns the ticket lifecycle: validation of references, hybrid search,
+creation/update with cascading side effects (audit history, real-time
+notifications, cache invalidation and background embedding/scraping
+tasks). All API routes that mutate or read tickets eventually call into
+this module so the side-effect ordering stays in one place.
 """
 
 import uuid
@@ -21,9 +23,11 @@ from . import notification_service, embedding_service, scraping_service, cache_s
 
 
 def is_valid_ticket_ref(ref: str) -> bool:
-    """Validates identifier references mapping sequential numbers or UUID strings.
+    """Return True if `ref` is a valid ticket reference.
 
-    Acts as the primary validation gateway resolving input path formatting.
+    A reference is valid when it is either a positive integer (matching
+    the human-readable `ticket_number`) or a UUID string (matching the
+    canonical `id`).
     """
     try:
         int(ref)
@@ -44,14 +48,28 @@ async def hybrid_search_tickets(
     search: str,
     pool: int = 100,
 ) -> list[Ticket]:
-    """Executes Reciprocal Rank Fusion (RRF) blending semantic vectors and keywords.
+    """Rank tickets by Reciprocal Rank Fusion of semantic and keyword results.
 
-    Optimizes result prioritization mapping exact matching titles and description text
-    scores combined with PGVector distance metrics. Falls back to keyword logic
-    upon external API outages.
+    Runs two independent queries against `base_query`:
+
+    - A **semantic** query ordering by pgvector cosine distance between
+      the ticket embedding and the embedding of `search`.
+    - A **keyword** query matching `search` against `title` and
+      `description` with `ILIKE`.
+
+    Both result sets are merged using RRF (`1 / (rank + K)`, with `K = 60`)
+    so neither signal alone dominates the ranking. When the embedding
+    backend is unavailable, the function transparently falls back to the
+    keyword-only ranking.
+
+    Args:
+        db: Async SQLAlchemy session.
+        base_query: Pre-filtered `Select` to apply the search on top of.
+        search: User-supplied search text.
+        pool: Maximum candidates considered per signal before fusion.
 
     Returns:
-        list[Ticket]: RRF-ranked collection of raw ticket database entities.
+        list[Ticket]: Tickets sorted by descending RRF score.
     """
     from app.services.embedding_service import generate_embedding
 
@@ -59,6 +77,8 @@ async def hybrid_search_tickets(
     K = 60
 
     search_embedding = await generate_embedding(search, task_type="RETRIEVAL_QUERY")
+    # Why: exact title matches always outrank partial matches, regardless
+    # of how SQLAlchemy chooses to order the secondary `updated_at` key.
     keyword_rank = case(
         (func.lower(Ticket.title) == search.lower(), 0),
         (Ticket.title.ilike(pattern), 1),
@@ -99,14 +119,15 @@ async def hybrid_search_tickets(
 
 
 async def get_ticket(db: AsyncSession, ticket_id: uuid.UUID) -> Optional[TicketOut]:
-    """Extracts unified incident profiles eagerly joining related author and assignee ORMs.
+    """Fetch a single ticket by UUID with author and assignee eager-loaded.
 
     Args:
-        db: Active asynchronous database transactional session.
-        ticket_id: Target record identifying key.
+        db: Async SQLAlchemy session.
+        ticket_id: Primary key of the ticket.
 
     Returns:
-        Optional[TicketOut]: Validated immutable representation of incident records.
+        TicketOut | None: Validated Pydantic representation, or `None` if
+        the ticket does not exist.
     """
     result = await db.execute(
         select(Ticket)
@@ -125,7 +146,7 @@ async def get_ticket(db: AsyncSession, ticket_id: uuid.UUID) -> Optional[TicketO
 
 
 async def get_ticket_by_number(db: AsyncSession, number: int) -> Optional[Ticket]:
-    """Queries operational database models selecting through numerical indices."""
+    """Fetch a ticket by its human-readable `ticket_number`."""
     result = await db.execute(
         select(Ticket)
         .options(
@@ -138,9 +159,13 @@ async def get_ticket_by_number(db: AsyncSession, number: int) -> Optional[Ticket
 
 
 async def resolve_ticket(db: AsyncSession, ref: str) -> Optional[Ticket]:
-    """Resolves physical ticket assets evaluating both sequential integer and UUID inputs.
+    """Resolve a ticket from either a numeric number or a UUID string.
 
-    Bridges legacy API schemas providing unified dynamic resolution routines.
+    Tries the numeric path first (because all human-typed references in
+    the UI use that form) and falls back to UUID resolution.
+
+    Returns:
+        Ticket | None: The resolved ORM instance, or `None`.
     """
     _opts = [
         selectinload(Ticket.author),    # type: ignore[attr-defined]
@@ -170,13 +195,16 @@ async def create_ticket(
     client_url: Optional[str] = None,
     client_summary: Optional[str] = None,
 ) -> TicketOut:
-    """Registers a persistent ticket, writes initial audit state, and sparks side effects.
+    """Create a ticket and run all the associated side effects.
 
-    Coordinates secondary cascades including caching invalidation, universal alerts,
-    real-time push notifications, and background asynchronous scraping/embedding jobs.
+    The ticket row is persisted first so the rest of the operations (audit
+    entry, notifications, WebSocket broadcast, cache invalidation, async
+    embedding/scraping) have a stable id to reference. The embedding and
+    URL scraping are dispatched as background tasks because they involve
+    external services and must not block the HTTP response.
 
     Returns:
-        TicketOut: The newly stored validated output payload schema.
+        TicketOut: The freshly created ticket, eager-loaded.
     """
     ticket = Ticket(
         title=title,
@@ -189,7 +217,7 @@ async def create_ticket(
     )
     db.add(ticket)
     await db.flush()
-    
+
     author_result = await db.execute(select(User).where(User.id == author_id))
     author = author_result.scalar_one()
 
@@ -211,14 +239,16 @@ async def create_ticket(
     asyncio.create_task(generate_ticket_embedding_task(ticket.id, title, description))
     if client_url:
         asyncio.create_task(scraping_service.scrape_and_index_url(ticket.id, client_url))
-        
+
     return await get_ticket(db, ticket.id) # type: ignore
 
 
 async def generate_ticket_embedding_task(ticket_id: uuid.UUID, title: str, description: Optional[str]) -> None:
-    """Task daemon writing vectorized text representations into persistent ticket tables.
+    """Compute and persist the ticket embedding in an isolated session.
 
-    Operates using distinct disconnected database sessions isolating transactional risks.
+    Designed to be scheduled via `asyncio.create_task` after the request
+    has returned. Uses its own SQLAlchemy session so a failure here cannot
+    poison the caller's transaction; errors are logged with `exc_info`.
     """
     embedding = await embedding_service.generate_ticket_embedding(title, description)
     if embedding is None:
@@ -235,7 +265,7 @@ async def generate_ticket_embedding_task(ticket_id: uuid.UUID, title: str, descr
                 logging.getLogger(__name__).info(f"Ticket Service: Persistent embedding for ticket {ticket_id}")
     except Exception as exc:
         logging.getLogger(__name__).error(
-            f"Ticket Service: Failed to persist embedding for {ticket_id}: {str(exc)}", 
+            f"Ticket Service: Failed to persist embedding for {ticket_id}: {str(exc)}",
             exc_info=True
         )
 
@@ -246,14 +276,21 @@ async def update_ticket(
     update_data: dict,
     actor: User,
 ) -> Optional[TicketOut]:
-    """Executes generic attribute updates across any incident metadata attributes.
+    """Apply a partial update and emit fine-grained audit + notification events.
 
-    Compares pre-mutation and post-mutation states creating granular discrete historical
-    audit logging entries for each localized delta, firing target alert triggers.
+    For every changed field, a `TicketHistory` row is recorded with the
+    old and new value (description changes only record the fact of the
+    change, not the body). Status, priority and assignee changes also
+    trigger dedicated notifications. When `title` or `description` change,
+    a background task regenerates the embedding; when `client_url`
+    changes, a background re-scrape is dispatched.
+
+    Returns:
+        TicketOut | None: The updated ticket, or `None` if it did not exist.
     """
     result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = result.scalar_one_or_none()
-    
+
     if not ticket:
         return None
 

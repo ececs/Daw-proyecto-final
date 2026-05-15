@@ -23,11 +23,11 @@ _pool = None
 
 
 async def init_checkpointer() -> None:
-    """Initializes the PostgreSQL conversational state checkpointer asynchronously.
+    """Open the psycopg connection pool and prepare the checkpoint tables.
 
-    Configures a dedicated AsyncConnectionPool using psycopg and instantiates the
-    AsyncPostgresSaver checkpointer instance. Executes necessary table initialization.
-    Fails gracefully falling back to stateless mode if connectivity issues arise.
+    Called once during FastAPI startup. On any failure the singletons
+    stay at `None` and the agent falls back to stateless mode — the
+    application keeps working without persistent conversation memory.
     """
     global _checkpointer, _pool
 
@@ -46,6 +46,9 @@ async def init_checkpointer() -> None:
         
         v_logger.info("Initializing checkpointer with URL: %s", db_url.split("@")[-1])
 
+        # Why: `psycopg` does not accept SQLAlchemy's `+asyncpg` URL
+        # scheme; strip it so the same DATABASE_URL works for both
+        # SQLAlchemy and the LangGraph checkpointer.
         _pool = AsyncConnectionPool(
             conninfo=db_url,
             min_size=1,
@@ -55,10 +58,10 @@ async def init_checkpointer() -> None:
         )
         await _pool.open(wait=True, timeout=10.0)
 
-        # Initialize the checkpointer with the pool
         _checkpointer = AsyncPostgresSaver(_pool)
-        
-        # CRITICAL: Ensure tables exist
+
+        # Why: idempotent DDL — creates the `checkpoint_*` tables if
+        # they do not exist yet so a fresh database is auto-bootstrapped.
         await _checkpointer.setup()
         
         v_logger.info("✅ LangGraph Checkpointer fully initialized and persistent")
@@ -71,21 +74,12 @@ async def init_checkpointer() -> None:
 
 
 def get_checkpointer():
-    """Retrieves the active persistent conversational checkpointer instance.
-
-    Returns:
-        Optional[AsyncPostgresSaver]: The global checkpointer singleton, or None if the
-            system is running in stateless fallback mode.
-    """
+    """Return the shared checkpointer, or `None` in stateless fallback mode."""
     return _checkpointer
 
 
 async def close_pool() -> None:
-    """Closes the dedicated PostgreSQL connection pool gracefully on shutdown.
-
-    Ensures database connection resources are properly returned to the database engine
-    during clean application teardown cycles.
-    """
+    """Close the checkpointer's connection pool. Called on FastAPI shutdown."""
     global _pool
     if _pool is not None:
         await _pool.close()

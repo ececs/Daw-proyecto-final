@@ -19,7 +19,7 @@ from app.db.base import Base
 
 
 class NotificationType(str, enum.Enum):
-    """Delineates the system action or state boundary that triggered a notification."""
+    """Reason a notification was emitted (used by the UI to pick the icon)."""
     assigned = "assigned"          # A ticket was assigned/reassigned to the user
     commented = "commented"        # A new comment was added to a ticket the user is involved in
     status_changed = "status_changed"  # A ticket's status changed
@@ -30,11 +30,7 @@ class NotificationType(str, enum.Enum):
 
 
 class Notification(Base):
-    """Represents a system-generated activity alert intended for a specific user.
-
-    Persists alert state and facilitates delivery payloads for both WebSocket relays
-    and the frontend persistence badge tracking.
-    """
+    """One in-app notification targeted at a specific user."""
 
     __tablename__ = "notifications"
 

@@ -83,16 +83,14 @@ Guidelines:
 
 
 def _resolve_primary_choice(preferred_provider: str | None) -> tuple[str, str]:
-    """Resolves the target AI provider and concrete LLM model name mapping.
+    """Resolve which provider and model to use for the primary LLM call.
 
-    Evaluates runtime overrides against environment variables and system settings
-    to compute a fallback-ready model pairing.
-
-    Args:
-        preferred_provider: Optional string key to override settings defaults.
+    Explicit overrides (`"openai"`, `"google"`) win; `"auto"` (or `None`)
+    falls back to `settings.AI_PROVIDER` / `settings.AI_MODEL`.
 
     Returns:
-        tuple[str, str]: A resolved (provider_name, model_name) tuple.
+        tuple[str, str]: `(provider, model)` ready to be passed to the
+        corresponding LangChain client.
     """
     normalized = (preferred_provider or "auto").lower()
     if normalized == "openai":
@@ -107,35 +105,28 @@ def _resolve_primary_choice(preferred_provider: str | None) -> tuple[str, str]:
 
 @lru_cache(maxsize=4)
 def get_llm(preferred_provider: str | None = None) -> BaseChatModel:
-    """Retrieves a cached language model instance with established fallback bindings.
+    """Return a cached chat-model client for the given provider.
 
-    Applies LRU caching to the constructed chat interfaces ensuring efficient
-    object reuse across discrete request life cycles.
-
-    Args:
-        preferred_provider: Optional explicit provider selection to initialize.
-
-    Returns:
-        BaseChatModel: A configured LangChain language model ready for invocation.
+    The cache is keyed on `preferred_provider`, so the four legal values
+    (`None`, `"auto"`, `"openai"`, `"google"`) result in at most four
+    long-lived clients reused across requests.
     """
     return _build_llm(preferred_provider)
 
 
 def _build_llm(preferred_provider: str | None = None) -> BaseChatModel:
-    """Constructs the active LLM engine bindings and binds error fallbacks.
+    """Build the primary chat model and wrap it with a cross-provider fallback.
 
-    Instantiates the primary chat model (Google or OpenAI) and wraps it inside
-    an automated fallback wrapper using the secondary provider credentials
-    to prevent transient outage failures.
-
-    Args:
-        preferred_provider: The explicitly requested primary provider identifier.
-
-    Returns:
-        BaseChatModel: An instantiated chat model, potentially wrapped with fallbacks.
+    The primary is the one chosen by `_resolve_primary_choice`; when keys
+    for the other provider are available, it is wired up as a
+    `.with_fallbacks([...])` so transient outages of the primary fall
+    through to the secondary transparently. Configuration-level errors
+    (e.g. missing keys) are **not** caught — those should fail loudly at
+    startup.
 
     Raises:
-        ValueError: If crucial API key configurations for the chosen provider are missing.
+        ValueError: If the API key for the chosen primary provider is
+            not configured.
     """
     primary_provider, primary_model = _resolve_primary_choice(preferred_provider)
 
@@ -223,25 +214,28 @@ def build_agent(
     metrics_tracker: AIRunTracker | None = None,
     preferred_provider: str | None = None,
 ):
-    """Assembles a contextualized ReAct agent bound to a single runtime lifecycle.
+    """Compile a ReAct agent bound to the current request.
 
-    Compiles the runtime LangGraph integrating the LLM provider, custom database tools,
-    PostgreSQL conversation persistence checkpointers, and security metadata.
+    The returned graph carries the LLM, the per-request tool bindings
+    (which embed `db` and `actor` into their closures), the persistent
+    PostgreSQL checkpointer and an optional `system_context` block
+    appended to the static `SYSTEM_PROMPT`.
 
     Args:
-        db: The active database session passed down to the functional tools layer.
-        actor: The authenticated User entity acting as the agent supervisor.
-        system_context: Supplementary prompt directives or frontend UI state snapshots.
-        metrics_tracker: Custom analytical recorder emitting logs to telemetry storage.
-        preferred_provider: Override option to enforce a specific model execution.
+        db: Async SQLAlchemy session forwarded to the tools.
+        actor: Authenticated user the agent acts on behalf of.
+        system_context: Extra runtime context (e.g. "user is viewing
+            ticket 42") appended verbatim to the system prompt.
+        metrics_tracker: Optional `AIRunTracker` shared with the tools so
+            tool calls and RAG hits are counted in the AIRun row.
+        preferred_provider: Optional provider override.
 
     Returns:
-        CompiledGraph: An executable LangGraph agent instance ready to stream events.
+        CompiledGraph: LangGraph agent ready to be invoked or streamed.
     """
     llm = get_llm(preferred_provider)
     tools = make_tools(db, actor, metrics_tracker=metrics_tracker)
-    
-    # Restoring persistent PostgreSQL memory
+
     checkpointer = get_checkpointer()
 
     full_prompt = SYSTEM_PROMPT

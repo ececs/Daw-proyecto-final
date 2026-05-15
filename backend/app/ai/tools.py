@@ -1,18 +1,19 @@
-"""LangGraph Tool Factory Module with Pydantic Validation.
+"""LangGraph tools exposed to the AI agent.
 
-This module defines the suite of tools available to the AI agent. It uses
-Pydantic schemas for argument validation, ensuring that the LLM provides
-correctly formatted data (UUIDs, Enums, etc.) before hitting the database.
+Each tool is a Pydantic-validated callable that the LLM can invoke through
+the ReAct loop. The factory `make_tools` binds the active SQLAlchemy
+session, the authenticated user and an optional `AIRunTracker` into the
+closure of every tool so the LLM never has to handle those plumbing
+concerns.
 
-Available Tools:
-- query_tickets: search and filter tickets with pagination.
-- get_ticket: fetch complete details of a single ticket.
-- create_ticket: create a new support ticket.
-- change_status: transition a ticket between workflow states.
-- add_comment: append a message to a ticket thread.
-- update_ticket: update any field in a ticket (priority, title, etc.).
-- search_knowledge: query the semantic knowledge base (RAG).
-- delete_ticket: permanently remove a ticket (requires interrupt).
+A single `asyncio.Lock` is shared across all tools to serialise database
+work on the same session — the LLM occasionally produces parallel tool
+calls and the SQLAlchemy `AsyncSession` is not safe for concurrent use.
+
+**Important:** the docstring of each `@tool` function becomes the natural-
+language description the LLM reads when deciding which tool to call.
+Rewording them changes the agent's behaviour; keep the wording faithful
+to what the function actually does.
 """
 
 import uuid
@@ -36,33 +37,36 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize(s: str) -> str:
-    """Lowercase + strip diacritics for accent-insensitive comparison."""
+    """Lowercase and strip diacritics for accent-insensitive comparison."""
     return "".join(
         c for c in unicodedata.normalize("NFD", s.lower())
         if unicodedata.category(c) != "Mn"
     )
 
 
-# --- Pydantic Schemas for Tool Arguments ---
+# --- Pydantic argument schemas (one per tool) ---
 
 class QueryTicketsSchema(BaseModel):
-    """Validation schema for querying and filtering system tickets."""
+    """Arguments for `query_tickets`."""
     status: Optional[str] = Field(None, description="Filter by: open, in_progress, in_review, closed")
     priority: Optional[str] = Field(None, description="Filter by: low, medium, high, critical")
     search: Optional[str] = Field(None, description="Text to search in the ticket title")
     limit: int = Field(10, ge=1, le=50, description="Max results to return")
 
+
 class GetTicketSchema(BaseModel):
-    """Validation schema for retrieving discrete ticket details."""
+    """Arguments for `get_ticket`."""
     ticket_id: str = Field(..., description="The UUID string of the ticket")
 
+
 class GetTicketHistorySchema(BaseModel):
-    """Validation schema for fetching ticket historical audit trails."""
+    """Arguments for `get_ticket_history`."""
     ticket_id: str = Field(..., description="UUID of the ticket")
     limit: int = Field(15, ge=1, le=50, description="Max history entries to return")
 
+
 class CreateTicketSchema(BaseModel):
-    """Validation schema for creating new ticketing incidents."""
+    """Arguments for `create_ticket`."""
     title: str = Field(..., description="Concise title of the issue")
     description: Optional[str] = Field(None, description="Detailed context")
     priority: str = Field("medium", description="low, medium, high, or critical")
@@ -70,26 +74,30 @@ class CreateTicketSchema(BaseModel):
     client_url: Optional[str] = Field(None, description="Client's website URL for analysis")
     client_summary: Optional[str] = Field(None, description="Brief summary of who the client is and what they do")
 
+
 class ReassignTicketSchema(BaseModel):
-    """Validation schema for performing user reassignment events."""
+    """Arguments for `reassign_ticket`."""
     ticket_id: str = Field(..., description="UUID of the ticket")
     assignee_email: str = Field(
         ...,
         description="Email of the user to assign, or 'unassign' to clear. If find_users returned exactly one confirmed match, use that email from the tool result instead of asking the user for it again."
     )
 
+
 class ChangeStatusSchema(BaseModel):
-    """Validation schema for performing state workflow transitions."""
+    """Arguments for `change_status`."""
     ticket_id: str = Field(..., description="UUID of the ticket")
     new_status: str = Field(..., description="New state: open, in_progress, in_review, closed")
 
+
 class AddCommentSchema(BaseModel):
-    """Validation schema for appending textual messages to ticket threads."""
+    """Arguments for `add_comment`."""
     ticket_id: str = Field(..., description="UUID of the target ticket")
     content: str = Field(..., description="Text content of the comment")
 
+
 class UpdateTicketSchema(BaseModel):
-    """Validation schema for modifying multiple general ticket parameters."""
+    """Arguments for `update_ticket`."""
     ticket_id: str = Field(..., description="UUID of the ticket")
     title: Optional[str] = Field(None, description="New title")
     description: Optional[str] = Field(None, description="New description")
@@ -98,54 +106,57 @@ class UpdateTicketSchema(BaseModel):
     client_url: Optional[str] = Field(None, description="New client website URL")
     client_summary: Optional[str] = Field(None, description="New client profile summary")
 
+
 class SearchKnowledgeSchema(BaseModel):
-    """Validation schema for executing semantic vector-space RAG queries."""
+    """Arguments for `search_knowledge`."""
     query: str = Field(..., description="The question or search phrase")
     k: int = Field(5, ge=1, le=10, description="Number of passages to retrieve")
 
+
 class AIDiagnoseSchema(BaseModel):
-    """Validation schema for initiating automated AI Co-pilot diagnoses."""
+    """Arguments for `ai_diagnose_ticket`."""
     ticket_id: str = Field(..., description="UUID of the ticket to diagnose")
 
+
 class FindUsersSchema(BaseModel):
-    """Validation schema for searching user records by textual name matching."""
+    """Arguments for `find_users`."""
     name: str = Field(
         ...,
         description="Partial or full name to search for (case-insensitive). Use this before reassigning when the user gives a name instead of an email."
     )
 
+
 class DeleteTicketSchema(BaseModel):
-    """Validation schema for triggering high-risk ticket deletion signals."""
+    """Arguments for `delete_ticket`."""
     ticket_id: str = Field(..., description="UUID of the ticket to delete")
 
-# --- Tool Factory ---
 
 def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | None = None) -> List:
-    """Constructs a collection of validated, scoped tools for the agent graph.
+    """Build the list of tools bound to the current request.
 
-    Embeds active transaction boundaries and security context (authenticated actor)
-    directly into the tool execution lifecycle. Employs locks to maintain
-    operational atomicity inside the shared graph session.
+    Captures `db`, `actor` and `metrics_tracker` in closures so every tool
+    operates with the right session, identity and telemetry plumbing. A
+    shared `asyncio.Lock` serialises database access to keep the
+    `AsyncSession` single-threaded.
 
     Args:
-        db: Active asynchronous SQLAlchemy transactional session.
-        actor: The authenticated User model executing the agent graph session.
-        metrics_tracker: Runtime telemetry tracker configured for the execution run.
+        db: Async SQLAlchemy session for the agent run.
+        actor: Authenticated user the agent is acting on behalf of.
+        metrics_tracker: Optional tracker shared with the surrounding
+            AIRun so tool calls and RAG hits get counted.
 
     Returns:
-        List: Collection of LangChain tools bound with defined argument schemas.
+        list: LangChain `BaseTool` instances ready to be plugged into
+        `create_react_agent`.
     """
     lock = asyncio.Lock()
 
     @tool(args_schema=QueryTicketsSchema)
     async def query_tickets(status=None, priority=None, search=None, limit=10) -> str:
-        """Executes a query to search and filter existing ticketing incidents.
+        """Search and filter tickets. Returns status, priority, title and ID.
 
-        Leverages hybrid search capabilities when searching by text, or falls back
-        to priority-sorted deterministic ordering.
-
-        Returns:
-            str: Formatted list string containing status, priority, and ticket keys.
+        Uses the hybrid keyword + vector search when `search` is given;
+        otherwise sorts by priority (critical first) then oldest first.
         """
         logger.info(f"AI Tool: query_tickets(status={status}, priority={priority}, search={search})")
         async with lock:
@@ -163,11 +174,11 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                         return f"Invalid priority '{priority}'."
 
                 if search:
-                    # Hybrid search (same engine as the UI table)
                     tickets = await ticket_service.hybrid_search_tickets(db, base, search, pool=limit * 5)
                     tickets = tickets[:limit]
                 else:
-                    # No search — sort by priority (Critical first) then oldest first (FIFO)
+                    # Why: critical first, then FIFO so the oldest critical
+                    # ticket surfaces at the top of the list.
                     priority_order = case(
                         (Ticket.priority == TicketPriority.critical, 1),
                         (Ticket.priority == TicketPriority.high, 2),
@@ -192,11 +203,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=GetTicketSchema)
     async def get_ticket(ticket_id: str) -> str:
-        """Retrieves detailed descriptive information for a single discrete ticket.
-
-        Returns:
-            str: Formatted summary outlining the title, status, and full description.
-        """
+        """Get details of a specific ticket (title, status, description)."""
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -209,11 +216,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=GetTicketHistorySchema)
     async def get_ticket_history(ticket_id: str, limit: int = 15) -> str:
-        """Recovers the chronological audit trail for a specified ticket incident.
-
-        Returns:
-            str: A multi-line string documenting mutation events, actors, and datetimes.
-        """
+        """Get the audit history of a ticket (who changed what, when)."""
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -238,11 +241,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=CreateTicketSchema)
     async def create_ticket(title, description=None, priority="medium", assignee_email=None, client_url=None, client_summary=None) -> str:
-        """Creates a new ticketing incident record populated with client metadata context.
-
-        Returns:
-            str: Operation success message displaying the generated ticket UUID.
-        """
+        """Create a new ticket. Returns the new ticket id."""
         async with lock:
             try:
                 prio = TicketPriority(priority)
@@ -254,11 +253,11 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                     assignee_id = user.id
 
                 ticket = await ticket_service.create_ticket(
-                    db, 
-                    title=title, 
-                    description=description, 
-                    priority=prio, 
-                    author_id=actor.id, 
+                    db,
+                    title=title,
+                    description=description,
+                    priority=prio,
+                    author_id=actor.id,
                     assignee_id=assignee_id,
                     client_url=client_url,
                     client_summary=client_summary
@@ -269,11 +268,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=ChangeStatusSchema)
     async def change_status(ticket_id: str, new_status: str) -> str:
-        """Performs an atomic workflow state transition on an active ticket.
-
-        Returns:
-            str: Success string confirming completion of the transition.
-        """
+        """Change the status of a ticket (open, in_progress, in_review, closed)."""
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -286,11 +281,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=AddCommentSchema)
     async def add_comment(ticket_id: str, content: str) -> str:
-        """Appends a new threaded textual commentary entry onto an active ticket.
-
-        Returns:
-            str: Success indicator confirming comment persistence.
-        """
+        """Add a comment to a ticket."""
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -304,21 +295,15 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=UpdateTicketSchema)
     async def update_ticket(
-        ticket_id: str, 
-        title=None, 
-        description=None, 
-        priority=None, 
-        assignee_email=None, 
-        client_url=None, 
+        ticket_id: str,
+        title=None,
+        description=None,
+        priority=None,
+        assignee_email=None,
+        client_url=None,
         client_summary=None
     ) -> str:
-        """Modifies multiple arbitrary attribute fields associated with a ticket.
-
-        Triggers background indexing workflows automatically if client URL properties undergo updates.
-
-        Returns:
-            str: Update status confirmation message.
-        """
+        """Update one or more fields of a ticket. Triggers re-scraping if client_url changes."""
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -328,7 +313,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                 if priority: update_data["priority"] = TicketPriority(priority)
                 if client_url: update_data["client_url"] = client_url
                 if client_summary: update_data["client_summary"] = client_summary
-                
+
                 if assignee_email:
                     if assignee_email.lower() == "unassign":
                         update_data["assignee_id"] = None
@@ -339,8 +324,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                         update_data["assignee_id"] = user.id
 
                 updated_ticket = await ticket_service.update_ticket(db, tid, update_data, actor)
-                
-                # If URL changed, trigger background scraping
+
                 if client_url:
                     import asyncio
                     asyncio.create_task(scraping_service.scrape_and_index_url(tid, client_url))
@@ -351,11 +335,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=SearchKnowledgeSchema)
     async def search_knowledge(query: str, k: int = 5) -> str:
-        """Queries the vectorized knowledge repository executing RAG lookups.
-
-        Returns:
-            str: A concatenated string of text passages yielding semantic proximity to query.
-        """
+        """Search the internal knowledge base (RAG) for documentation or context."""
         async with lock:
             try:
                 result = await knowledge_service.search_with_stats(db, query, k=k)
@@ -371,11 +351,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=AIDiagnoseSchema)
     async def ai_diagnose_ticket(ticket_id: str) -> str:
-        """Invokes the AI Co-pilot engine to execute a multi-hop incident diagnosis.
-
-        Returns:
-            str: Comprehensive diagnostic textual reasoning containing remediation proposals.
-        """
+        """Run the AI co-pilot diagnosis on a ticket and return the suggested fix."""
         async with lock:
             try:
                 from app.services import ai_copilot_service
@@ -392,11 +368,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=ReassignTicketSchema)
     async def reassign_ticket(ticket_id: str, assignee_email: str) -> str:
-        """Executes user ownership reassignment binding tickets to target emails.
-
-        Returns:
-            str: Final assignment confirmation summary indicating success.
-        """
+        """Reassign a ticket to another user identified by email (or 'unassign')."""
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -414,11 +386,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=FindUsersSchema)
     async def find_users(name: str) -> str:
-        """Searches matching user system accounts employing case-insensitive partial names.
-
-        Returns:
-            str: Enumeration of matching profiles displaying name and primary contact email.
-        """
+        """Search users by partial name (case- and accent-insensitive). Returns name + email."""
         async with lock:
             try:
                 needle = _normalize(name)
@@ -444,11 +412,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
 
     @tool(args_schema=DeleteTicketSchema)
     async def delete_ticket(ticket_id: str) -> str:
-        """Issues a deletion request signal triggering human-in-the-loop approval gateways.
-
-        Returns:
-            str: Specially serialized confirmation signal to be intercepted by the SSE router.
-        """
+        """Request deletion of a ticket. The frontend intercepts the marker string and shows a confirmation."""
         async with lock:
             try:
                 tid = uuid.UUID(ticket_id)
@@ -456,6 +420,9 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                 ticket = result.scalar_one_or_none()
                 if not ticket:
                     return "Ticket not found."
+                # Why: when the actor is not the author we return a different
+                # marker so the SSE router offers to *notify* the author
+                # instead of deleting directly.
                 if ticket.author_id != actor.id:
                     return f"__DELETE_REQUEST_OFFER__:{ticket_id}:{ticket.title}"
                 title = ticket.title
@@ -464,8 +431,8 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
             except Exception as e:
                 return f"Error: {e}"
 
-        # Return the marker with the real title — the router intercepts this
-        # and sends a 'confirmation_required' SSE event to the frontend.
+        # Why: the marker is intercepted by the SSE router which emits a
+        # `confirmation_required` event so the user can approve the delete.
         return f"__DELETE_REQUESTED__:{ticket_id}:{title}"
 
     return [

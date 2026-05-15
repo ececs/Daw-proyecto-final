@@ -34,22 +34,15 @@ async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
     access_token: Annotated[str | None, Cookie()] = None,
 ) -> User:
-    """Resolves the authenticated user from an incoming request.
+    """Resolve the authenticated user from the Bearer header or cookie.
 
-    Inspects the authorization lifecycle sequentially checking the Bearer token header
-    first, followed by the access token HttpOnly cookie fallback.
-
-    Args:
-        db: The active asynchronous database session.
-        credentials: The HTTP Bearer credentials resolved by FastAPI.
-        access_token: The access token extracted from request cookies.
-
-    Returns:
-        User: The SQLAlchemy user model representing the active requester.
+    Tries the `Authorization: Bearer ...` header first (typical for API
+    clients and Swagger UI), then falls back to the `access_token`
+    HttpOnly cookie set after the browser-based OAuth login.
 
     Raises:
-        HTTPException: If credentials are not present (401), the token is invalid
-            or expired (401), or the underlying user record has been deleted (401).
+        HTTPException: **401** when no credentials are provided, the token
+            is invalid/expired, or the user row has since been deleted.
     """
     # Extract the token from whichever source is available
     token: str | None = None

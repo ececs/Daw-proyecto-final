@@ -1,7 +1,8 @@
-"""Attachment database model mapping.
+"""Attachment metadata.
 
-Handles file upload tracking, associating object storage references (MinIO/R2)
-with parent ticketing objects to facilitate binary and document attachments.
+The actual file lives in object storage (`storage_key`); this row only
+holds metadata and the `use_for_rag` flag that decides whether the
+content is indexed by the knowledge base pipeline.
 """
 
 import uuid
@@ -12,12 +13,7 @@ from app.db.base import Base
 
 
 class Attachment(Base):
-    """Represents an uploaded file object associated with a support ticket.
-
-    Stores file metadata including system MIME types, byte sizes, direct cloud
-    storage access keys, and explicit toggles defining utilization scope for the
-    automated RAG injection layers of the AI Assistant.
-    """
+    """A file uploaded to a ticket. Cascades on ticket delete."""
 
     __tablename__ = "attachments"
 

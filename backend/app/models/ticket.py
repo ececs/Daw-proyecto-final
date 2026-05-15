@@ -36,7 +36,7 @@ except ImportError:
 
 
 class TicketStatus(str, enum.Enum):
-    """Workflow state boundaries defining the progression lifecycle of a ticket."""
+    """Workflow states a ticket can be in (drives the kanban columns)."""
     open = "open"
     in_progress = "in_progress"
     in_review = "in_review"
@@ -44,7 +44,7 @@ class TicketStatus(str, enum.Enum):
 
 
 class TicketPriority(str, enum.Enum):
-    """Urgency tiers utilized to rank execution priority and visualization markers."""
+    """Urgency tiers used for ranking and visual cues in the UI."""
     low = "low"
     medium = "medium"
     high = "high"
@@ -52,10 +52,10 @@ class TicketPriority(str, enum.Enum):
 
 
 class Ticket(Base):
-    """Represents a distinct work item or incident within the ticketing ecosystem.
+    """Ticket aggregate root.
 
-    Captures workflow lifecycle status, priority ranking, ownership, and includes
-    asynchronous vector embedding properties for semantic similarity searching.
+    Carries the core fields, the pgvector embedding used for semantic
+    search and the relationships to its author and assignee.
 
     Attributes:
         id: UUID primary key (generated server-side for security).

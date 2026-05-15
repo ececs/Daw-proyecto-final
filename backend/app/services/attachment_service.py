@@ -1,7 +1,9 @@
-"""Ticket file attachment metadata and processing coordinator.
+"""Attachment service.
 
-Facilitates local database metadata tracking, asset persistence via storage services,
-and schedules downstream asynchronous RAG vectorization jobs for eligible file types.
+Owns metadata for ticket attachments. Delegates blob handling to
+`storage_service` and RAG indexing to `knowledge_service`. Files marked
+with `use_for_rag=True` are indexed in a background task so the HTTP
+response is not blocked by the embedding pipeline.
 """
 
 import asyncio
@@ -22,7 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 async def _to_schema(attachment: Attachment) -> AttachmentOut:
-    """Constructs an validated schema from ORMs injecting freshly presigned URLs."""
+    """Convert an `Attachment` ORM row into its response schema.
+
+    The `download_url` is generated on the fly as a presigned URL; a
+    storage failure is degraded to `None` so the rest of the metadata is
+    still served.
+    """
     try:
         url = await storage_service.get_presigned_url(attachment.storage_key)
     except Exception:
@@ -47,9 +54,11 @@ async def _ingest_attachment_bg(
     mime_type: str,
     filename: str,
 ) -> None:
-    """Orchestrates background content ingestion without blocking main event threads.
+    """Download the file and index it as RAG knowledge in a background task.
 
-    Spawns dedicated database sessions to prevent transaction collision.
+    Runs in its own SQLAlchemy session so a failure here cannot taint the
+    caller's transaction. On successful ingestion, a `rag_indexed`
+    notification is sent to the ticket's author and assignee.
     """
     async with AsyncSessionLocal() as db:
         try:
@@ -91,14 +100,10 @@ async def list_attachments(
     db: AsyncSession,
     ticket_id: uuid.UUID,
 ) -> List[AttachmentOut]:
-    """Fetches all discrete file metadata records associated with a ticket.
-
-    Args:
-        db: Active asynchronous SQLAlchemy transactional database session.
-        ticket_id: Parent ticket identifying key.
+    """Return every attachment of a ticket with a freshly generated download URL.
 
     Returns:
-        List[AttachmentOut]: Serialized collections containing active download URLs.
+        list[AttachmentOut]: Attachments ordered from oldest to newest.
     """
     result = await db.execute(
         select(Attachment)
@@ -116,20 +121,16 @@ async def create_attachment(
     content: bytes,
     mime_type: str,
 ) -> Optional[AttachmentOut]:
-    """Atomically uploads files to stores, creates database metadata, and records audit trails.
+    """Upload the file to storage and persist its metadata atomically.
 
-    Implements compensation cleanups to purge orphaned objects if database commits fail.
-
-    Args:
-        db: Active asynchronous SQLAlchemy database session.
-        ticket_id: Destination ticket uuid.
-        uploader_id: Initiating uploader system ID.
-        filename: Base text filename descriptor.
-        content: Raw file binary byte payload.
-        mime_type: Incoming MIME file format identifier.
+    If the database commit fails after the upload, the orphan blob in
+    storage is deleted in a best-effort compensation step so we do not
+    leak files. A history entry (`attachment_added`) is recorded after
+    the successful commit.
 
     Returns:
-        Optional[AttachmentOut]: Newly created metadata object schema.
+        AttachmentOut | None: The persisted attachment, or `None` if the
+        parent ticket does not exist.
     """
     ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     if not ticket_result.scalar_one_or_none():
@@ -155,6 +156,8 @@ async def create_attachment(
         await db.commit()
         await db.refresh(attachment)
     except Exception:
+        # Why: compensate the side-effecting upload so a failed commit
+        # does not leave an orphan blob in object storage.
         try:
             await storage_service.delete_file(storage_key)
         except Exception:
@@ -179,9 +182,15 @@ async def delete_attachment(
     attachment_id: uuid.UUID,
     actor_id: uuid.UUID,
 ) -> bool:
-    """Purges database metadata, deletes vector knowledge fragments, and removes stored objects.
+    """Delete an attachment, its RAG chunks and the underlying blob.
 
-    Validates ownership constraints preventing deletion of non-owned files.
+    Only the uploader is authorised. The storage deletion is best-effort:
+    if the bucket call fails, the metadata is still removed (the file
+    will be a lonely orphan but the row will be gone).
+
+    Returns:
+        bool: `True` on success; `False` if the attachment is missing or
+        the actor is not the uploader.
     """
     result = await db.execute(select(Attachment).where(Attachment.id == attachment_id))
     attachment = result.scalar_one_or_none()
@@ -219,10 +228,14 @@ async def update_attachment_rag(
     attachment_id: uuid.UUID,
     use_for_rag: bool,
 ) -> Optional[AttachmentOut]:
-    """Toggles vectorized RAG indexing flag for existing file attachments.
+    """Toggle the RAG-indexing flag for an attachment.
 
-    Schedules non-blocking extraction tasks if set to true, or purges existing
-    knowledge base indexes if set to false.
+    Enabling the flag schedules a background ingestion task; disabling it
+    removes any chunks already indexed for the attachment.
+
+    Returns:
+        AttachmentOut | None: The updated attachment, or `None` if it
+        does not exist.
     """
     result = await db.execute(select(Attachment).where(Attachment.id == attachment_id))
     attachment = result.scalar_one_or_none()

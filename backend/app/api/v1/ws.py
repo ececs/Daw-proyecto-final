@@ -1,8 +1,9 @@
-"""WebSocket gateway for low-latency real-time user interactions.
+"""WebSocket gateway.
 
-Establishes persistent duplex connections enabling live event pushes spanning 
-immediate system alerts, live typing presence, and asynchronous RAG completions.
-Leverages local standalone DB context managers isolating active protocol loops.
+Single duplex endpoint used by the frontend to receive real-time events:
+notifications, ticket updates and presence pings. Authentication is
+performed via a JWT passed as a query parameter (WebSocket clients cannot
+set custom headers from the browser).
 """
 
 import asyncio
@@ -23,17 +24,25 @@ async def websocket_endpoint(
     websocket: WebSocket,
     token: str = Query(..., description="JWT access token"),
 ):
-    """Establishes persistent socket tunnels transmitting real-time server notifications.
+    """Authenticate the JWT, send the initial state and keep the socket alive.
 
-    Authenticates inbound query tokens, broadcasts initial historical alerts count states,
-    and cycles through continuous keep-alive wait-loops ensuring connection stability.
+    Flow:
+
+    1. Decode the JWT from the query string; close with code **4001** on
+       failure or unknown user.
+    2. Register the socket in the `WebSocketManager` so other parts of the
+       backend can push events to this user.
+    3. Send the initial unread-count and any pending notifications so the
+       frontend can hydrate the bell icon immediately.
+    4. Enter a `receive_text` loop with a 30-second timeout that doubles as
+       a server-side ping to detect dead connections.
 
     Args:
-        websocket: Specialized inbound duplex communication protocol object.
-        token: Signed JWT string mapping user identity attributes.
+        websocket: The accepted WebSocket connection.
+        token: Signed JWT carrying the user id.
 
     Closes:
-        Code 4001: Issued upon token invalidation or missing database user records.
+        4001: Invalid or missing token, or no matching user.
     """
     user_id = decode_access_token(token)
     if not user_id:
@@ -49,13 +58,15 @@ async def websocket_endpoint(
 
         await manager.connect(websocket, user.id)
 
+        # Why: deferred import keeps the websocket module decoupled from
+        # the schemas package at startup time.
         from app.schemas.websocket import WSMessage, WSMessageType
-        
+
         unread_count = await notification_service.get_unread_count(db, user.id)
         msg = WSMessage(
             type=WSMessageType.SYSTEM_ALERT,
             data={"unread_count": unread_count},
-            message="Estado inicial cargado"
+            message="Initial state loaded"
         )
         await websocket.send_text(msg.model_dump_json())
 
@@ -68,6 +79,9 @@ async def websocket_endpoint(
             )
             await websocket.send_text(notif_msg.model_dump_json())
 
+    # Why: a blocking `receive_text` keeps the connection open; the timeout
+    # turns into an application-level ping that lets us detect a half-open
+    # TCP socket and exit the loop cleanly.
     try:
         while True:
             try:

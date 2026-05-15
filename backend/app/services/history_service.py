@@ -1,7 +1,9 @@
-"""Append-only audit trail management service.
+"""Ticket audit-history service.
 
-Persists point-in-time snapshots tracking property deltas triggered by system mutation events.
-Maintains a historical integrity boundary by disallowing internal deletions or updates.
+Append-only log of every field-level change on a ticket. Used both by the
+UI (history tab) and by `ai_metrics_service` to compute time-to-close.
+There are no update / delete helpers on purpose: the log is meant to be
+immutable.
 """
 
 import uuid
@@ -21,15 +23,19 @@ async def record_change(
     old_value: str | None,
     new_value: str | None,
 ) -> None:
-    """Appends a single delta mutation log to the ticket's audit history trail.
+    """Append a single audit entry. Uses `flush`, not `commit`.
+
+    Letting the caller decide the transaction boundary keeps the history
+    write atomic with the mutation it describes — both rows land together
+    or neither does.
 
     Args:
-        db: Active asynchronous SQLAlchemy transactional session.
-        ticket_id: The UUID key of the target ticket being audited.
-        actor_id: The UUID identification key of the user driving the mutation.
-        field: Textual field name undergoing state modification.
-        old_value: Text string of the prior value before mutation.
-        new_value: Text string of the new state value after committing.
+        db: Async SQLAlchemy session.
+        ticket_id: Ticket being audited.
+        actor_id: User performing the change.
+        field: Name of the modified field (e.g. `"status"`, `"priority"`).
+        old_value: Previous value as a string, or `None`.
+        new_value: New value as a string, or `None`.
     """
     entry = TicketHistory(
         ticket_id=ticket_id,
@@ -47,17 +53,10 @@ async def get_history(
     ticket_id: uuid.UUID,
     limit: int = 100,
 ) -> list[TicketHistoryOut]:
-    """Retrieves chronological change records associated with a single ticket.
+    """Return the latest `limit` audit entries for a ticket, newest first.
 
-    Uses eager loading for the associated Actor profile to minimize N+1 queries.
-
-    Args:
-        db: Active asynchronous SQLAlchemy database session.
-        ticket_id: Unique UUID reference for the targeted ticket history.
-        limit: Constraints the maximum return size of the query array.
-
-    Returns:
-        list[TicketHistoryOut]: Serialized audit logs sorted in descending order.
+    Eager-loads the actor relation to avoid N+1 queries when serialising
+    the response.
     """
     result = await db.execute(
         select(TicketHistory)

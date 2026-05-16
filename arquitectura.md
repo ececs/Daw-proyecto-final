@@ -1,62 +1,62 @@
-# 🏛️ System Architecture: Ticket AI (D4-Ticket AI)
+# 🏛️ Arquitectura del Sistema: Ticket AI (D4-Ticket AI)
 
-This document provides an exhaustive technical overview of the software architecture, transactional pipelines, and distributed workflows designed for the **D4-Ticket AI** graduation project. It outlines the decoupled integration between the Frontend ecosystem (React/Next.js), the reactive API Gateway (FastAPI), and the underlying Artificial Intelligence & Persistence layers.
+Este documento proporciona una descripción técnica exhaustiva de la arquitectura de software, los flujos transaccionales y los flujos de trabajo distribuidos diseñados para el proyecto final de grado **D4-Ticket AI**. Detalla la integración desacoplada entre el ecosistema Frontend (React/Next.js), el API Gateway reactivo (FastAPI) y las capas subyacentes de Inteligencia Artificial y Persistencia.
 
 ---
 
-## 📊 1. High-Level Topology (C4 System Context)
+## 📊 1. Topología de Alto Nivel (Contexto de Sistema C4)
 
-The following architecture diagram illustrates the runtime deployment topology and functional boundaries:
+El siguiente diagrama de arquitectura ilustra la topología de despliegue en tiempo de ejecución y los límites funcionales del sistema:
 
 ```mermaid
 graph TB
-    subgraph Client ["🌐 Client Tier (Frontend)"]
+    subgraph Client ["🌐 Capa Cliente (Frontend)"]
         UI[Next.js 16+ App Router]
-        State[Zustand State Manager]
-        WS_Client[WebSocket Client]
+        State[Gestor de Estado Zustand]
+        WS_Client[Cliente WebSocket]
         UI --> State
         UI --> WS_Client
     end
 
-    subgraph Gateway ["⚙️ API Gateway & Business Logic"]
+    subgraph Gateway ["⚙️ API Gateway y Lógica de Negocio"]
         FastAPI[FastAPI App - Python 3.12]
-        Auth[Google OAuth2 & Stateless JWT]
-        Router[REST & SSE Routers]
-        WS_Mgr[WebSocket Manager]
+        Auth[Google OAuth2 y JWT Stateless]
+        Router[Enrutadores REST y SSE]
+        WS_Mgr[Gestor de WebSockets]
         
         FastAPI --> Auth
         FastAPI --> Router
         FastAPI --> WS_Mgr
     end
 
-    subgraph AI ["🧠 Artificial Intelligence & RAG Engines"]
-        LG[LangGraph Orchestrator]
-        RAG[RAG Semantic Retrieval]
+    subgraph AI ["🧠 Inteligencia Artificial y Motores RAG"]
+        LG[Orquestador LangGraph]
+        RAG[Recuperación Semántica RAG]
         LLM[LLMs: OpenAI / Gemini]
-        Metrics[Telemetry: AI Run Tracker]
+        Metrics[Telemetría: AI Run Tracker]
         
         LG --> RAG
         LG --> LLM
         LG --> Metrics
     end
 
-    subgraph Persistence ["💾 Data & Real-Time Persistence"]
+    subgraph Persistence ["💾 Capa de Persistencia y Tiempo Real"]
         DB[(PostgreSQL 16 + pgvector)]
-        Redis[(Redis Cache & PubSub)]
+        Redis[(Redis Cache y PubSub)]
         S3[(MinIO / Cloudflare R2)]
     end
 
-    %% Communications
+    %% Comunicaciones y Protocolos
     UI -- HTTPS / REST --> Router
     WS_Client -- WebSocket (WSS) --> WS_Mgr
-    UI -- Event Streams (SSE) --> LG
+    UI -- Flujos de Eventos (SSE) --> LG
 
     Router --> DB
     Router --> Redis
     Router --> S3
     
-    LG -- Vector Distance Search --> DB
-    LG -- Thread Checkpoints --> DB
+    LG -- Búsqueda por Distancia Vectorial --> DB
+    LG -- Checkpoints de Hilo (Thread) --> DB
     
     WS_Mgr -- SUBSCRIBE --> Redis
     DB -- LISTEN / NOTIFY --> FastAPI
@@ -64,123 +64,123 @@ graph TB
 
 ---
 
-## 🔐 2. Authentication Pipeline (Stateless Google OAuth 2.0)
+## 🔐 2. Pipeline de Autenticación (Google OAuth 2.0 Stateless)
 
-The system implements an industrialized 3-legged OAuth 2.0 authorization grant flow. It leverages cryptographically signed `HttpOnly` cookies for state validation to mitigate Cross-Site Request Forgery (CSRF) threat vectors.
+El sistema implementa un flujo industrializado de autorización OAuth 2.0 de tres pasos (*3-legged OAuth*). Utiliza cookies con firma criptográfica y la directiva `HttpOnly` para la validación del parámetro de estado (`state`), mitigando de forma nativa los vectores de ataque de tipo Falsificación de Petición en Sitios Cruzados (CSRF).
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User
-    participant Browser
-    participant API as FastAPI Backend
-    participant Google as Google Identity Provider
+    actor Usuario as Usuario
+    participant Navegador as Navegador
+    participant API as API (FastAPI Backend)
+    participant Google as Google (Proveedor de Identidad)
 
-    User->>Browser: Clicks "Sign in with Google"
-    Browser->>API: GET /api/v1/auth/google
-    Note over API: Generates random cryptographic state
-    API-->>Browser: Set-Cookie: oauth_state (HttpOnly, Lax)<br>Redirect URL (Google Auth + state)
-    Browser->>Google: Grant User Permissions
-    Google-->>Browser: Redirect with ?code=XXX&state=YYY
-    Browser->>API: GET /api/v1/auth/callback?code=XXX&state=YYY
-    Note over API: Verifies incoming state matches stored cookie value
-    API->>Google: POST /token (Authorization Code Exchange)
-    Google-->>API: Returns access_token & IdToken claims
-    Note over API: Evaluates domain whitelisting & persists/merges User record
-    Note over API: Generates signed HS256 JWT holding user context
-    API-->>Browser: Redirects to Frontend with ?token=JWT
-    Note over Browser: Stores JWT payload in LocalStorage / React Context
+    Usuario->>Navegador: Hace clic en "Iniciar sesión con Google"
+    Navegador->>API: GET /api/v1/auth/google
+    Note over API: Genera un estado criptográfico aleatorio (state)
+    API-->>Navegador: Set-Cookie: oauth_state (HttpOnly, Lax)<br>URL de Redirección (Google Auth + state)
+    Navegador->>Google: Concede permisos de usuario
+    Google-->>Navegador: Redirecciona con ?code=XXX&state=YYY
+    Navegador->>API: GET /api/v1/auth/callback?code=XXX&state=YYY
+    Note over API: Verifica que el estado recibido coincida con el de la cookie almacenada
+    API->>Google: POST /token (Intercambio de Código de Autorización)
+    Google-->>API: Retorna access_token y claims de IdToken
+    Note over API: Evalúa lista blanca de dominios y persiste/fusiona el registro de Usuario
+    Note over API: Genera un JWT firmado con HS256 con el contexto del usuario
+    API-->>Navegador: Redirecciona al Frontend con ?token=JWT
+    Note over Navegador: Almacena el payload del JWT en LocalStorage / Contexto de React
 ```
 
 ---
 
-## ⚡ 3. Real-Time Communication Layer (Reactive WebSockets)
+## ⚡ 3. Capa de Comunicación en Tiempo Real (WebSockets Reactivos)
 
-To achieve zero-latency updates across multiple concurrent operators (e.g., rendering live ticket cards instantly inside the Kanban view), the platform implements an event-driven Publish/Subscribe pattern bound to **PostgreSQL LISTEN/NOTIFY**.
+Para lograr actualizaciones con latencia cero entre múltiples operadores concurrentes (por ejemplo, renderizar tarjetas de tickets en tiempo real al instante dentro de la vista Kanban), la plataforma implementa un patrón de Publicación/Suscripción (*Publish/Subscribe*) dirigido por eventos y vinculado al mecanismo **PostgreSQL LISTEN/NOTIFY**.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor OpA as Operator A
-    participant FrontendA as UI Client A
-    participant DB as PostgreSQL (Database Triggers)
-    participant API as FastAPI (Asyncpg Worker Pool)
-    participant FrontendB as UI Client B (Subscribed)
-    actor OpB as Operator B
+    actor OpA as Operador A
+    participant FrontendA as Cliente UI A
+    participant DB as PostgreSQL (Triggers de BD)
+    participant API as FastAPI (Pool de Workers Asyncpg)
+    participant FrontendB as Cliente UI B (Suscrito)
+    actor OpB as Operador B
 
-    OpA->>FrontendA: Submits Ticket / Appends Comment
+    OpA->>FrontendA: Envía Ticket / Añade Comentario
     FrontendA->>API: POST /api/v1/tickets (REST)
     API->>DB: INSERT INTO ticket (...)
-    Note over DB: Triggers pg_notify('notifications', JSON_PAYLOAD)
-    DB-->>API: Asynchronous connection interrupt (AsyncPG listen loop)
-    Note over API: Evaluates frame routing (specific UserID or Global '*')
-    API-->>FrontendB: Dispatches WebSocket Frame: { type: "TICKET_CREATED", data: {...} }
-    Note over FrontendB: Zustand refreshes state reactively without polling
-    FrontendB-->>OpB: Renders dynamic ticket card instantly on viewport
+    Note over DB: Dispara trigger: pg_notify('notifications', JSON_PAYLOAD)
+    DB-->>API: Interrupción de conexión asíncrona (bucle listen de AsyncPG)
+    Note over API: Evalúa el enrutamiento de tramas (UserID específico o Global '*')
+    API-->>FrontendB: Envía trama WebSocket: { type: "TICKET_CREATED", data: {...} }
+    Note over FrontendB: Zustand refresca el estado reactivamente sin realizar sondeo (polling)
+    FrontendB-->>OpB: Renderiza la tarjeta de ticket dinámica al instante en el viewport
 ```
 
 ---
 
-## 🧠 4. Intelligent Co-Pilot: Hybrid RAG & Agentic Workflows
+## 🧠 4. Copiloto Inteligente: RAG Híbrido y Flujos Agénticos
 
-The core AI engine assists operators in troubleshooting complex tickets by combining precise lexical retrieval with vector-based conceptual semantics.
+El motor de IA principal asiste a los operadores en la resolución de problemas de tickets complejos combinando una recuperación léxica precisa con semántica conceptual basada en vectores.
 
-### Retrieval Engine: Hybrid Search via Reciprocal Rank Fusion (RRF)
-Raw vector similarity searches often fail on exact names, configuration flags, or system port numbers. To guarantee robust recall, the backend orchestrates:
-1.  **Semantic Vector Search**: Embeds incoming user queries via external vectorizers and computes cosine distance inside `pgvector`.
-2.  **Lexical Search (BM25/Full-Text)**: Executes traditional, weighted full-text index lookups inside Postgres.
-3.  **Reciprocal Rank Fusion**: Consumes both ranked lists and applies a weighted Reciprocal Rank Fusion equation to provide an industrialized, highly accurate fused set of document chunks.
+### Motor de Recuperación: Búsqueda Híbrida mediante Reciprocal Rank Fusion (RRF)
+Las búsquedas por similitud vectorial pura a menudo fallan con nombres exactos, banderas (*flags*) de configuración o números de puerto del sistema. Para garantizar una recuperación (*recall*) robusta, el backend orquesta:
+1.  **Búsqueda Vectorial Semántica**: Genera los embeddings de las consultas de los usuarios mediante vectorizadores externos y calcula la distancia coseno dentro de `pgvector`.
+2.  **Búsqueda Léxica (BM25/Full-Text)**: Ejecuta búsquedas tradicionales ponderadas sobre índices de texto completo (*Full-Text*) en PostgreSQL.
+3.  **Reciprocal Rank Fusion (RRF)**: Consume ambas listas clasificadas y aplica una ecuación matemática RRF ponderada para proporcionar un conjunto fusionado de fragmentos (*chunks*) de documentos altamente preciso e industrializado.
 
-### Cyclic State Graph (LangGraph Orchestration)
-Rather than employing a basic, sequential text-completion interface, the chat co-pilot is modeled as a **Cyclic Stateful Action-Selection Graph**:
+### Grafo de Estado Cíclico (Orquestación con LangGraph)
+En lugar de emplear una interfaz de completado de texto básica y secuencial, el copiloto de chat está modelado como un **Grafo Cíclico de Selección de Acciones con Estado (*Cyclic Stateful Action-Selection Graph*)**:
 
 ```mermaid
 graph LR
-    Start([Start]) --> Input[Context Integrator]
-    Input --> Agent{Should Execute Tool?}
+    Start([Inicio]) --> Input[Integrador de Contexto]
+    Input --> Agent{¿Debe ejecutar herramienta?}
     
-    Agent -- Yes --> ToolCall[Tool Runtime Dispatcher]
-    ToolCall -- RAG Retriever --> Knowledge[(Vector Chunks)]
-    ToolCall -- DB Mutator --> SQL[(Postgres DB)]
-    ToolCall -- Scraping Worker --> Internet[External Target URL]
+    Agent -- Sí --> ToolCall[Despachador de Herramientas en Ejecución]
+    ToolCall -- RAG Retriever --> Knowledge[(Chunks Vectoriales)]
+    ToolCall -- DB Mutator --> SQL[(BD Postgres)]
+    ToolCall -- Scraping Worker --> Internet[URL Externa Objetivo]
     
     Knowledge --> Agent
     SQL --> Agent
     Internet --> Agent
     
-    Agent -- No / Halt --> Output[SSE Token Streaming]
-    Output --> End([End])
+    Agent -- No / Parar --> Output[Streaming de Tokens vía SSE]
+    Output --> End([Fin])
 ```
 
-### Telemetry & Economic Modeling
-Every operational runtime trace is logged inside the database via a unified `AIRunTracker` module:
-*   Aggregates actual input/output token counters on terminal connection closures.
-*   Applies specific cost-per-million metrics to estimate the absolute USD transaction cost for each LLM invocation.
-*   Pairs runtime stats with end-user `AIFeedback` payloads for offline evaluation and prompt engineering cycles.
+### Telemetría y Modelado Económico
+Cada traza de ejecución en tiempo de ejecución se registra en la base de datos a través de un módulo unificado `AIRunTracker`:
+*   Agrupa contadores de tokens reales de entrada/salida (*input/output*) en el cierre de la conexión.
+*   Aplica métricas específicas de coste por millón para estimar el coste de transacción absoluto en USD para cada invocación de LLM.
+*   Empareja las estadísticas de tiempo de ejecución con las respuestas de feedback de los usuarios finales (`AIFeedback`) para su posterior evaluación offline y ciclos de ingeniería de prompts (*prompt engineering*).
 
 ---
 
-## 📁 5. Project Directory Layout (Professional Monorepo)
+## 📁 5. Estructura de Directorios del Proyecto (Monorepo Profesional)
 
 ```text
 📂 DAW-PROYECTO-FINAL
-├── 📂 backend/                  # FastAPI Enterprise Clean Architecture (Hexagonal-Lite)
+├── 📂 backend/                  # Arquitectura Limpia Enterprise con FastAPI (Hexagonal-Lite)
 │   ├── 📂 app/
-│   │   ├── 📂 ai/               # Agentic Workflows, LangGraph Checkpointers, & Observability
-│   │   ├── 📂 api/              # API Gateway controllers (REST, SSE, WebSockets)
-│   │   ├── 📂 core/             # JWT Security, PydanticSettings Config, & WebSocketManager
-│   │   ├── 📂 db/               # Asynchronous SQLAlchemy Engine & Session Factories
-│   │   ├── 📂 models/           # Declarative Domain Models (SQLAlchemy Mappings)
-│   │   ├── 📂 schemas/          # Typed Input/Output Data Transfer Objects (Pydantic)
-│   │   └── 📂 services/         # Domain Logic Modules (Cache, RAG, Scrapers, Notifications)
-│   └── 📂 tests/                # Integration Pytest Suite (212 test cases, Zero Regressions)
+│   │   ├── 📂 ai/               # Flujos Agénticos, Checkpointers de LangGraph y Observabilidad
+│   │   ├── 📂 api/              # Controladores del API Gateway (REST, SSE, WebSockets)
+│   │   ├── 📂 core/             # Seguridad JWT, Configuración PydanticSettings y WebSocketManager
+│   │   ├── 📂 db/               # Motor de SQLAlchemy Asíncrono y Factorías de Sesión
+│   │   ├── 📂 models/           # Modelos de Dominio Declarativos (Mapeos de SQLAlchemy)
+│   │   ├── 📂 schemas/          # Objetos de Transferencia de Datos (DTO) Tipados Entrada/Salida (Pydantic)
+│   │   └── 📂 services/         # Módulos de Lógica de Dominio (Caché, RAG, Scrapers, Notificaciones)
+│   └── 📂 tests/                # Suite de Pruebas de Integración con Pytest (212 casos, Cero Regresiones)
 │
-└── 📂 frontend/                 # Next.js Enterprise Component Topology
-    ├── 📂 e2e/                  # Playwright End-to-End Browser Test Specs
+└── 📂 frontend/                 # Topología de Componentes Next.js Enterprise
+    ├── 📂 e2e/                  # Especificaciones de Pruebas de Navegador End-to-End con Playwright
     └── 📂 src/
-        ├── 📂 app/              # App Router Hierarchy (Pages, Dynamic Slugs, Global Layouts)
-        ├── 📂 components/       # Atomized React UI Modules (Kanban Board, AI Lateral Drawers)
-        ├── 📂 hooks/            # Stateful Enterprise Custom Hooks (useAuth, useWS)
-        ├── 📂 lib/              # External Clients (Axios Singleton Instance) & Utility Helpers
-        └── 📂 store/            # Zustand State Slices (Global Responsive UI Synchronization)
+        ├── 📂 app/              # Jerarquía de App Router (Páginas, Slugs Dinámicos, Layouts Globales)
+        ├── 📂 components/       # Módulos de UI de React Atomizados (Tablero Kanban, Cajones Laterales de IA)
+        ├── 📂 hooks/            # Hooks Personalizados Enterprise con Estado (useAuth, useWS)
+        ├── 📂 lib/              # Clientes Externos (Instancia Singleton de Axios) y Helpers de Utilidad
+        └── 📂 store/            # Slices de Estado de Zustand (Sincronización Global de UI Responsiva)
 ```

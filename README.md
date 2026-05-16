@@ -404,14 +404,18 @@ npm run dev
 
 ## Base de datos y migraciones
 
-- El proyecto usa `Alembic` para versionar cambios de esquema.
-- El backend ejecuta `alembic upgrade head` al arrancar en Docker.
-- En ejecución manual hay que lanzarlo explícitamente antes de iniciar FastAPI.
-- La base de datos incluye:
-  - tablas de tickets, comentarios, adjuntos, usuarios y notificaciones
-  - historial de actividad
-  - soporte `pgvector`
-  - ajustes para preservar histórico cuando un ticket se elimina
+El proyecto está diseñado siguiendo el paradigma moderno **Code-First ORM** con **SQLAlchemy 2** en el backend. 
+
+- **Modelos como fuente de verdad:** Toda la estructura de tablas, tipos de datos, restricciones relacionales (`FOREIGN KEY`, `NOT NULL`, `UNIQUE`) y tipos vectoriales de IA (`VECTOR(768)`) se definen en Python dentro de `backend/app/models/*.py`.
+- **Migraciones versionadas con Alembic:** Los cambios del esquema se rastrean a través de scripts de migración generados y ordenados en `backend/alembic/versions/*.py`.
+- **Automatización en Docker:** Al arrancar el stack con `docker-compose up`, el contenedor del backend ejecuta de forma autónoma `alembic upgrade head`, desplegando y actualizando todas las tablas al instante sobre el contenedor de PostgreSQL.
+- **Script SQL de Consulta (`database.sql`):** Para facilitar la evaluación académica y cumplir con los requisitos tradicionales del tribunal de DAW, se incluye en la raíz el script físico **`database.sql`** que documenta en lenguaje SQL DDL puro toda la estructura correspondiente del proyecto.
+
+La base de datos incluye:
+- Tablas de tickets, comentarios, adjuntos, usuarios y notificaciones.
+- Historial de actividad persistente.
+- Soporte e indexación vectorial `pgvector` para el motor RAG de la Inteligencia Artificial.
+- Ajustes de integridad `SET NULL` para preservar el histórico de auditoría cuando un ticket se elimina del sistema.
 
 ## Acceso para evaluación
 

@@ -517,12 +517,28 @@ npm run type-check
 npm run build
 ```
 
-Tests unitarios con Vitest (43 casos):
+Tests unitarios e integración ligera con Vitest (58 casos):
 
 ```bash
 cd frontend
-npx vitest run
+npm test
 ```
+
+Storybook browser tests:
+
+```bash
+cd frontend
+npm run test:storybook
+```
+
+Ejecución completa de ambos proyectos de Vitest:
+
+```bash
+cd frontend
+npm run test:all
+```
+
+Nota: los tests browser de Storybook se ejecutan por separado para mantener `npm test` rápido y estable en entornos donde el runner Playwright integrado pueda tener restricciones de puertos o sandbox.
 
 La batería cubre cuatro módulos:
 

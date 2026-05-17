@@ -79,7 +79,7 @@ export function AIStatusButton() {
     <div ref={ref} className="relative">
       <button
         onClick={handleOpen}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+        className={`flex h-9 min-w-9 items-center justify-center rounded-lg text-sm font-medium transition-colors sm:h-auto sm:min-w-0 sm:gap-1.5 sm:px-3 sm:py-1.5 ${
           open
             ? "bg-slate-100 text-slate-700"
             : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
@@ -93,7 +93,7 @@ export function AIStatusButton() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-slate-200 z-50 overflow-hidden">
+        <div className="fixed inset-x-3 top-16 z-50 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg sm:absolute sm:right-0 sm:left-auto sm:top-full sm:mt-2 sm:w-80 sm:max-w-none">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <p className="text-xs font-semibold text-slate-700 uppercase tracking-wider">AI Status</p>
             {isHealthy && !hasError

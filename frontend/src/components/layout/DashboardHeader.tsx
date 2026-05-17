@@ -69,17 +69,17 @@ export function DashboardHeader({ token }: DashboardHeaderProps) {
 
   return (
     <>
-    <header className="bg-white border-b border-slate-200 px-6 py-3 sticky top-0 z-30">
-      <div className="max-w-7xl mx-auto flex items-center justify-between">
-        <Link href="/board" className="font-bold text-slate-800 text-lg tracking-tight hover:text-blue-600 transition-colors">
+    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white px-3 py-3 sm:px-6">
+      <div className="mx-auto flex max-w-7xl min-w-0 items-center justify-between gap-2">
+        <Link href="/board" className="min-w-0 truncate font-bold text-base tracking-tight text-slate-800 transition-colors hover:text-blue-600 sm:text-lg">
           D4-Ticket{" "}
           <span className="text-blue-600">AI</span>
         </Link>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           <button
             onClick={() => setChatOpen(!chatOpen)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-colors sm:h-auto sm:w-auto sm:gap-1.5 sm:px-3 sm:py-1.5 ${
               chatOpen
                 ? "bg-blue-600 text-white"
                 : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
@@ -97,7 +97,7 @@ export function DashboardHeader({ token }: DashboardHeaderProps) {
           <div className="relative">
             <button
               onClick={() => setDropdownOpen((o) => !o)}
-              className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              className="flex items-center gap-2 rounded-lg p-1.5 transition-colors hover:bg-slate-100"
               aria-label="User menu"
             >
               <UserAvatar 

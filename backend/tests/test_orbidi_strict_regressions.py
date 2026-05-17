@@ -101,7 +101,7 @@ async def test_delete_ticket_preserves_a_history_notification_with_null_ticket_i
     deletion_notifs = [
         notification
         for notification in notifications
-        if "eliminado" in notification["message"].lower()
+        if "was deleted by" in notification["message"].lower()
     ]
     assert len(deletion_notifs) == 1
     assert deletion_notifs[0]["ticket_id"] is None

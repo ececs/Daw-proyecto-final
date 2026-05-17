@@ -260,7 +260,7 @@ El sistema se ha construido siguiendo principios de arquitectura limpia y auto-d
 ### 📡 1. Capa Backend (OpenAPI 3.0 & FastAPI)
 El contrato de API RESTful del backend se autogenera y valida estáticamente mediante la integración nativa de **FastAPI y Pydantic v2**:
 - **Swagger UI**: Permite ejecutar interacciones vivas con el servidor, enviando peticiones HTTP reales y evaluando respuestas con esquemas en formato JSON Schema. Acceso en [http://localhost:8000/docs](http://localhost:8000/docs).
-- **ReDoc**: Ofrece una interfaz estática de tres columnas altamente legible ideal para el onboarding de ingenieros. Acceso en [http://localhost:8000/redoc](http://localhost:8000/redoc).
+- **ReDoc**: Vista de referencia estática generada automáticamente a partir del esquema OpenAPI de FastAPI. Presenta de forma estructurada los endpoints, parámetros, esquemas de datos y respuestas HTTP. Acceso en [http://localhost:8000/redoc](http://localhost:8000/redoc).
 
 ### 🎨 2. Capa Frontend (Storybook & Vitest Browser)
 El frontend aísla su catálogo de diseño mediante **Storybook 8** en formato CSF3. Esta suite sirve tanto de galería interactiva de componentes modulares como de suite de pruebas unitarias y visuales del DOM:

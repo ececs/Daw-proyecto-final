@@ -28,6 +28,7 @@ import { Notification } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 
 const WS_URL = process.env.NEXT_PUBLIC_API_URL?.replace("http", "ws") ?? "ws://localhost:8000";
+const IS_DEV = process.env.NODE_ENV !== "production";
 
 export function useWebSocket(token: string | null) {
   const ws = useRef<WebSocket | null>(null);
@@ -66,7 +67,9 @@ export function useWebSocket(token: string | null) {
         try {
           const wsMsg = JSON.parse(event.data);
           const { type, data, ticket_id, message } = wsMsg;
-          console.debug("🔌 WS Message:", { type, ticket_id, data });
+          if (IS_DEV && type !== "ping") {
+            console.debug("🔌 WS Message:", { type, ticket_id, data });
+          }
 
           if (type === "ping") return;
 
@@ -172,15 +175,21 @@ export function useWebSocket(token: string | null) {
               break;
 
             default:
-              console.warn("Unknown WebSocket message type:", type);
+              if (IS_DEV) {
+                console.warn("Unknown WebSocket message type:", type);
+              }
           }
         } catch (err) {
-          console.error("Failed to parse WebSocket message:", err);
+          if (IS_DEV) {
+            console.error("Failed to parse WebSocket message:", err);
+          }
         }
       };
 
       socket.onclose = (event) => {
-        console.log(`WebSocket closed: ${event.code} ${event.reason}`);
+        if (IS_DEV) {
+          console.log(`WebSocket closed: ${event.code} ${event.reason}`);
+        }
         // Why: 1000 means a clean close (component unmount); anything
         // else is treated as an unexpected drop that triggers a retry.
         if (event.code !== 1000) {

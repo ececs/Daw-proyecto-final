@@ -144,14 +144,14 @@ async def _agent_sse_stream(
 
 
 def _make_friendly_error(error_msg: str) -> str:
-    """Map a raw provider error message into a human-readable Spanish line.
+    """Map a raw provider error message into a human-readable English line.
 
     Falls back to the original message when no rule matches.
     """
     if "429" in error_msg or "quota" in error_msg.lower():
-        return "*(Sistema: Límite de uso de IA alcanzado. Espera unos segundos.)*"
+        return "*(System: AI usage limit reached. Please wait a few seconds.)*"
     if "api_key" in error_msg.lower() or "401" in error_msg:
-        return "*(Sistema: Error de configuración de clave de IA.)*"
+        return "*(System: AI API key configuration error.)*"
     return error_msg
 
 
@@ -332,7 +332,7 @@ async def chat(
             observability.record_error(error_msg, tracker.surface)
 
         async def error_generator():
-            yield f"data: {json.dumps({'type': 'error', 'content': f'*(Error de Configuración: {error_msg})*'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'content': f'*(Configuration Error: {error_msg})*'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         return StreamingResponse(error_generator(), media_type="text/event-stream")

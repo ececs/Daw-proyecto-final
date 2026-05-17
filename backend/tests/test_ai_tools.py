@@ -190,7 +190,7 @@ async def test_find_users_tool_returns_single_match_with_email(
     result = await find_users_tool.ainvoke({"name": "Test"})
 
     assert f"Found exactly 1 match: {test_user.name} ({test_user.email})." in result
-    assert f"¿Asigno a {test_user.name}?" in result
+    assert f"Should I assign it to {test_user.name}?" in result
     assert f"If the user confirms, call reassign_ticket with this email: {test_user.email}." in result
 
 

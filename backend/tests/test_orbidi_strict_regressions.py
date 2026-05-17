@@ -376,5 +376,5 @@ async def test_ai_chat_stream_returns_friendly_quota_error(client: AsyncClient):
     assert response.status_code == 200
     events = _parse_sse_payloads(response.text)
     error_event = next(event for event in events if event["type"] == "error")
-    assert "Límite de uso de IA alcanzado" in error_event["content"]
+    assert "AI usage limit reached" in error_event["content"]
     assert events[-1]["type"] == "done"

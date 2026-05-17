@@ -172,7 +172,7 @@ async def notify_ticket_deleted(
         user_id=actor.id,
         notification_type=NotificationType.ticket_deleted,
         ticket_id=None,
-        message=f'Ticket "{ticket_title}" eliminado por {actor.name}.',
+        message=f'Ticket "{ticket_title}" was deleted by {actor.name}.',
     )
 
 

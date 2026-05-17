@@ -78,7 +78,7 @@ Incluye:
   - `notifications_read_all`
 - El frontend actualiza estado local o hace refetch parcial según el tipo de evento.
 
-Los eventos emitidos son:
+Los eventos WebSocket emitidos son:
 
 | Evento                   | Descripción                                   |
 | :----------------------- | :-------------------------------------------- |
@@ -90,6 +90,20 @@ Los eventos emitidos son:
 | `notification_deleted`   | una notificación fue eliminada                |
 | `notifications_read_all` | todas las notificaciones marcadas como leídas |
 | `web_scrape_completed`   | el análisis de la URL del cliente finalizó    |
+
+Las notificaciones persistidas en base de datos usan una taxonomía distinta:
+
+| Tipo persistido        | Descripción                                                  |
+| :--------------------- | :----------------------------------------------------------- |
+| `assigned`             | el ticket fue asignado o reasignado al usuario               |
+| `commented`            | se añadió un comentario a un ticket relevante para el usuario |
+| `status_changed`       | cambió el estado del ticket                                  |
+| `ticket_updated`       | se modificó el ticket sin cambio de estado                   |
+| `ticket_deleted`       | se eliminó un ticket                                         |
+| `deletion_requested`   | otro usuario solicitó borrar un ticket                       |
+| `rag_indexed`          | terminó la indexación RAG de una URL o adjunto               |
+
+`ticket_created` es un evento WebSocket de sincronización de UI, no un tipo persistido dentro del enum `notification_type`.
 
 ### IA
 

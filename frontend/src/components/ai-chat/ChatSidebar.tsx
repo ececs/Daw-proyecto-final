@@ -508,7 +508,7 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
                       } disabled:opacity-70`}
                     >
                       {feedbackSubmittingId === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsUp className="w-3 h-3" />}
-                      Ayudó
+                      Helped
                     </button>
                     <button
                       onClick={() => submitFeedback(msg.id, msg.ai_run_id!, false)}
@@ -520,7 +520,7 @@ export function ChatSidebar({ onClose }: ChatSidebarProps) {
                       } disabled:opacity-70`}
                     >
                       {feedbackSubmittingId === msg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <ThumbsDown className="w-3 h-3" />}
-                      No ayudó
+                      Didn't help
                     </button>
                   </div>
                 )}

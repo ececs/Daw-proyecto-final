@@ -364,7 +364,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                 )
                 return diagnosis
             except Exception as e:
-                return f"Error al generar diagnóstico: {e}"
+                return f"Error generating diagnosis: {e}"
 
     @tool(args_schema=ReassignTicketSchema)
     async def reassign_ticket(ticket_id: str, assignee_email: str) -> str:
@@ -399,7 +399,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                     return (
                         f"Found exactly 1 match: {u.name} ({u.email}). "
                         f"Ask the user to confirm using the full name only, for example: "
-                        f"'¿Asigno a {u.name}?'. "
+                        f"'Should I assign it to {u.name}?'. "
                         f"If the user confirms, call reassign_ticket with this email: {u.email}."
                     )
                 lines = "\n".join(f"  - {u.name} ({u.email})" for u in users)

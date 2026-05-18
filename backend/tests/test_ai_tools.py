@@ -3,7 +3,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.ai.router import ChatMessage, _infer_chat_language
 from app.ai.tools import make_tools
+from app.services.ai_copilot_service import _infer_language
 from app.models.ticket import Ticket, TicketPriority, TicketStatus
 from app.models.ticket_history import TicketHistory
 from app.models.user import User
@@ -12,6 +14,20 @@ from app.models.user import User
 def _capture_task(coro):
     coro.close()
     return MagicMock()
+
+
+def test_infer_chat_language_prefers_spanish_when_user_writes_in_spanish():
+    messages = [
+        ChatMessage(role="user", content="Hola, ¿puedes revisar este ticket y decirme qué pasa?"),
+    ]
+    assert _infer_chat_language(messages) == "Spanish"
+
+
+def test_infer_language_prefers_spanish_for_ticket_context_with_spanish_hints():
+    assert _infer_language(
+        "Error en Google AdSense",
+        "La web muestra un problema de validación y necesito ayuda",
+    ) == "Spanish"
 
 
 async def test_update_ticket_tool_schedules_scrape_with_ticket_id_and_url(

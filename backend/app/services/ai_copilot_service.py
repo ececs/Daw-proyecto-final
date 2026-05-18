@@ -13,6 +13,7 @@ plumbing (`AIRunTracker`) used to compute cost and token metrics.
 
 import asyncio
 import logging
+import re
 from typing import Optional
 import uuid
 from sqlalchemy import select
@@ -26,6 +27,12 @@ from app.services.ai_metrics_service import AIRunTracker, estimate_tokens
 from app.services.knowledge_service import search_with_stats
 
 logger = logging.getLogger(__name__)
+
+_SPANISH_HINTS = {
+    "el", "la", "los", "las", "un", "una", "para", "porque", "que", "como",
+    "con", "sin", "hola", "gracias", "problema", "cambio", "quiero", "puedes",
+    "necesito", "tengo", "esto", "esta", "es", "en", "ticket", "prioridad",
+}
 
 
 async def _fetch_ticket_and_comments(db: AsyncSession, ticket_id: uuid.UUID):
@@ -57,6 +64,22 @@ def _format_comments(comments: list[Comment]) -> str:
         for c in reversed(list(comments))
     ]
     return "\n".join(comment_list)
+
+
+def _infer_language(*parts: str) -> str:
+    """Infer a stable output language from ticket/comment text.
+
+    Returns `"Spanish"` or `"English"` so diagnosis and reply prompts can
+    explicitly pin their response language.
+    """
+    text = "\n".join(part for part in parts if part).lower()
+    if not text:
+        return "English"
+    if re.search(r"[áéíóúñ¿¡]", text):
+        return "Spanish"
+    tokens = re.findall(r"[a-zA-Z]+", text)
+    spanish_hits = sum(1 for token in tokens if token in _SPANISH_HINTS)
+    return "Spanish" if spanish_hits >= 2 else "English"
 
 
 async def _collect_rag_context(
@@ -112,6 +135,12 @@ async def _prepare_diagnosis_context(
 
     comments_text = _format_comments(comments)
     search_query = f"{ticket.title} {ticket.description or ''}"
+    response_language = _infer_language(
+        ticket.title,
+        ticket.description or "",
+        ticket.client_summary or "",
+        comments_text,
+    )
     rag_text = await _collect_rag_context(
         db,
         ticket_id,
@@ -127,7 +156,8 @@ async def _prepare_diagnosis_context(
         "1. Be concise and professional.\n"
         "2. Identify the probable root cause.\n"
         "3. Propose a step-by-step solution.\n"
-        "4. Use the context from the knowledge base if relevant."
+        "4. Use the context from the knowledge base if relevant.\n"
+        f"5. Write the full diagnosis in {response_language} and keep that language consistently."
     )
 
     user_prompt = (
@@ -140,7 +170,7 @@ async def _prepare_diagnosis_context(
         f"{ticket.client_summary or 'No additional information available.'}\n\n"
         f"COMMENTS HISTORY:\n{comments_text or 'No comments.'}\n\n"
         f"TECHNICAL KNOWLEDGE (RAG):\n{rag_text}\n\n"
-        f"Provide a suggested solution."
+        f"Provide a suggested solution in {response_language}."
     )
 
     return system_prompt, user_prompt, ticket
@@ -164,6 +194,13 @@ async def _prepare_reply_context(
 
     comments_text = _format_comments(comments)
     search_query = f"{ticket.title} {ticket.description or ''} {resolution_note}"
+    response_language = _infer_language(
+        resolution_note,
+        ticket.title,
+        ticket.description or "",
+        ticket.client_summary or "",
+        comments_text,
+    )
     rag_text = await _collect_rag_context(
         db,
         ticket_id,
@@ -179,7 +216,7 @@ async def _prepare_reply_context(
         "1. Treat the technician resolution note as the primary source of truth.\n"
         "2. Do not invent steps, fixes, or results that are not supported by the note or context.\n"
         "3. Be clear, concise, professional, and practical.\n"
-        "4. Write in the same language implied by the technician note; if unclear, use English.\n"
+        f"4. Write in {response_language} and keep that language consistently.\n"
         "5. Produce comment-ready text only, not explanations about your reasoning.\n"
         "6. If some detail is uncertain, use prudent language instead of making things up."
     )

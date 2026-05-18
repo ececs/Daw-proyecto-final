@@ -6,9 +6,10 @@ metrics endpoints, and the feedback submission endpoint used by the
 thumbs-up/down UI.
 """
 
-import json
-import uuid
 import logging
+import json
+import re
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -29,6 +30,12 @@ from app.services import ai_metrics_service, ticket_service
 
 router = APIRouter(prefix="/ai", tags=["AI Agent"])
 
+_SPANISH_HINTS = {
+    "el", "la", "los", "las", "un", "una", "para", "porque", "que", "como",
+    "con", "sin", "hola", "gracias", "problema", "cambio", "quiero", "puedes",
+    "necesito", "tengo", "esto", "esta", "es", "en", "ticket", "prioridad",
+}
+
 
 class ChatMessage(BaseModel):
     """Single message in a chat request (`role` is `"user"` or `"assistant"`)."""
@@ -48,6 +55,22 @@ class ChatRequest(BaseModel):
     current_ticket_id: Optional[str] = None
     selected_ticket_ids: Optional[List[str]] = None
     preferred_provider: Optional[str] = None
+
+
+def _infer_chat_language(messages: List[ChatMessage]) -> str:
+    """Infer the dominant language of the current user conversation.
+
+    Returns `"Spanish"` or `"English"` so the runtime context can pin the
+    assistant language even when the model decides to default to English.
+    """
+    text = "\n".join(msg.content for msg in messages if msg.role == "user" and msg.content).lower()
+    if not text:
+        return "English"
+    if re.search(r"[áéíóúñ¿¡]", text):
+        return "Spanish"
+    tokens = re.findall(r"[a-zA-Z]+", text)
+    spanish_hits = sum(1 for token in tokens if token in _SPANISH_HINTS)
+    return "Spanish" if spanish_hits >= 2 else "English"
 
 
 async def _agent_sse_stream(
@@ -287,6 +310,12 @@ async def chat(
         except Exception as e:
             v_logger.warning("AI Context: failed to fetch selected tickets: %s", e)
 
+    inferred_language = _infer_chat_language(request.messages)
+    context_parts.insert(
+        0,
+        f"CURRENT USER LANGUAGE: {inferred_language}. "
+        f"Reply in {inferred_language} and keep using it unless the user explicitly switches language."
+    )
     extra_context = "\n\n" + "\n\n---\n\n".join(context_parts) if context_parts else ""
     input_tokens = sum(ai_metrics_service.estimate_tokens(msg.content) for msg in request.messages)
     tracker = ai_metrics_service.AIRunTracker(

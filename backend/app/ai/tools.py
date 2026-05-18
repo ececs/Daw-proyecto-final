@@ -131,7 +131,12 @@ class DeleteTicketSchema(BaseModel):
     ticket_id: str = Field(..., description="UUID of the ticket to delete")
 
 
-def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | None = None) -> List:
+def make_tools(
+    db: AsyncSession,
+    actor: User,
+    metrics_tracker: AIRunTracker | None = None,
+    current_language: str | None = None,
+) -> List:
     """Build the list of tools bound to the current request.
 
     Captures `db`, `actor` and `metrics_tracker` in closures so every tool
@@ -144,6 +149,8 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
         actor: Authenticated user the agent is acting on behalf of.
         metrics_tracker: Optional tracker shared with the surrounding
             AIRun so tool calls and RAG hits get counted.
+        current_language: Optional language pinned by the chat session,
+            used by tools that generate natural-language outputs.
 
     Returns:
         list: LangChain `BaseTool` instances ready to be plugged into
@@ -361,6 +368,7 @@ def make_tools(db: AsyncSession, actor: User, metrics_tracker: AIRunTracker | No
                     tid,
                     tracker=metrics_tracker,
                     preferred_provider=metrics_tracker.primary_provider if metrics_tracker else None,
+                    response_language=current_language,
                 )
                 return diagnosis
             except Exception as e:

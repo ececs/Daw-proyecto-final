@@ -262,3 +262,36 @@ async def test_delete_ticket_tool_offers_author_notification_when_actor_cannot_d
     result = await delete_tool.ainvoke({"ticket_id": str(ticket.id)})
 
     assert result == f"__DELETE_REQUEST_OFFER__:{ticket.id}:{ticket.title}"
+
+
+async def test_ai_diagnose_tool_forwards_current_chat_language_to_copilot(
+    db_session,
+    test_user: User,
+):
+    ticket = Ticket(
+        title="Diagnose in Spanish",
+        description="Need the diagnosis to stay in Spanish.",
+        priority=TicketPriority.medium,
+        author_id=test_user.id,
+    )
+    db_session.add(ticket)
+    await db_session.commit()
+
+    metrics_tracker = SimpleNamespace(primary_provider="openai")
+    tools = make_tools(
+        db_session,
+        test_user,
+        metrics_tracker=metrics_tracker,
+        current_language="Spanish",
+    )
+    diagnose_tool = next(tool for tool in tools if tool.name == "ai_diagnose_ticket")
+
+    with patch(
+        "app.services.ai_copilot_service.get_ticket_diagnosis",
+        new=AsyncMock(return_value="Diagnostico breve"),
+    ) as mock_diagnosis:
+        result = await diagnose_tool.ainvoke({"ticket_id": str(ticket.id)})
+
+    assert result == "Diagnostico breve"
+    mock_diagnosis.assert_awaited_once()
+    assert mock_diagnosis.await_args.kwargs["response_language"] == "Spanish"

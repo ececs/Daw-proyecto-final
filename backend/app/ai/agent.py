@@ -214,6 +214,7 @@ def build_agent(
     system_context: str = "",
     metrics_tracker: AIRunTracker | None = None,
     preferred_provider: str | None = None,
+    current_language: str | None = None,
 ):
     """Compile a ReAct agent bound to the current request.
 
@@ -230,12 +231,19 @@ def build_agent(
         metrics_tracker: Optional `AIRunTracker` shared with the tools so
             tool calls and RAG hits are counted in the AIRun row.
         preferred_provider: Optional provider override.
+        current_language: Optional conversation language pinned by the
+            API layer for this chat session.
 
     Returns:
         CompiledGraph: LangGraph agent ready to be invoked or streamed.
     """
     llm = get_llm(preferred_provider)
-    tools = make_tools(db, actor, metrics_tracker=metrics_tracker)
+    tools = make_tools(
+        db,
+        actor,
+        metrics_tracker=metrics_tracker,
+        current_language=current_language,
+    )
 
     checkpointer = get_checkpointer()
 

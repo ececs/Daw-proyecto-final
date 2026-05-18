@@ -344,6 +344,7 @@ async def chat(
             system_context=extra_context,
             metrics_tracker=tracker,
             preferred_provider=request.preferred_provider,
+            current_language=inferred_language,
         )
     except Exception as e:
         error_msg = str(e)

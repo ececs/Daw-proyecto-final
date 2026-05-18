@@ -121,7 +121,10 @@ async def _collect_rag_context(
 
 
 async def _prepare_diagnosis_context(
-    db: AsyncSession, ticket_id: uuid.UUID, tracker: AIRunTracker | None = None
+    db: AsyncSession,
+    ticket_id: uuid.UUID,
+    tracker: AIRunTracker | None = None,
+    response_language: str | None = None,
 ):
     """Build the system and user prompts used by the diagnosis feature.
 
@@ -135,7 +138,7 @@ async def _prepare_diagnosis_context(
 
     comments_text = _format_comments(comments)
     search_query = f"{ticket.title} {ticket.description or ''}"
-    response_language = _infer_language(
+    response_language = response_language or _infer_language(
         ticket.title,
         ticket.description or "",
         ticket.client_summary or "",
@@ -247,6 +250,7 @@ async def get_ticket_diagnosis(
     ticket_id: uuid.UUID,
     tracker: AIRunTracker | None = None,
     preferred_provider: str | None = None,
+    response_language: str | None = None,
 ) -> str:
     """Run a non-streaming diagnosis and return the full text.
 
@@ -256,13 +260,21 @@ async def get_ticket_diagnosis(
         tracker: Optional metrics tracker — updated with input/output
             tokens when supplied.
         preferred_provider: Optional override (`openai` / `google` / `auto`).
+        response_language: Optional language override forced by the chat
+            session. When omitted, the language is inferred from ticket
+            context.
 
     Returns:
         str: The diagnosis text, or a `"*(Co-pilot internal error: ...)*"`
         marker if the LLM call fails (the error is also logged).
     """
     try:
-        sys_p, user_p, _ = await _prepare_diagnosis_context(db, ticket_id, tracker=tracker)
+        sys_p, user_p, _ = await _prepare_diagnosis_context(
+            db,
+            ticket_id,
+            tracker=tracker,
+            response_language=response_language,
+        )
         if not sys_p:
             return "Error: Ticket not found."
 

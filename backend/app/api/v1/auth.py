@@ -48,7 +48,7 @@ _is_https = settings.BACKEND_URL.startswith("https")
 
 
 @router.get("/google", summary="Initiate Google OAuth login")
-async def login_google():
+async def login_google(request: Request):
     """Start the Google OAuth 2.0 authorization-code flow.
 
     Generates a random `state` value, stores it in an **HttpOnly** cookie to
@@ -60,6 +60,15 @@ async def login_google():
     """
     state = secrets.token_urlsafe(32)
     redirect_uri = f"{settings.BACKEND_URL}/api/v1/auth/callback"
+
+    # Detect the frontend origin from Referer header dynamically
+    referer = request.headers.get("referer")
+    frontend_url = settings.FRONTEND_URL
+    if referer:
+        from urllib.parse import urlparse
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            frontend_url = f"{parsed.scheme}://{parsed.netloc}"
 
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
@@ -79,6 +88,14 @@ async def login_google():
         samesite="lax",
         max_age=300,
     )
+    redirect.set_cookie(
+        key="oauth_frontend_url",
+        value=frontend_url,
+        httponly=True,
+        secure=_is_https,
+        samesite="lax",
+        max_age=300,
+    )
     return redirect
 
 
@@ -89,6 +106,7 @@ async def auth_callback(
     code: str,
     state: str,
     oauth_state: str | None = Cookie(default=None),
+    oauth_frontend_url: str | None = Cookie(default=None),
 ):
     """Handle the OAuth callback and issue an application JWT.
 
@@ -196,10 +214,12 @@ async def auth_callback(
 
     jwt_token = create_access_token(str(user.id))
 
+    target_frontend = oauth_frontend_url or settings.FRONTEND_URL
     redirect = RedirectResponse(
-        url=f"{settings.FRONTEND_URL}/api/auth/callback?token={jwt_token}"
+        url=f"{target_frontend}/api/auth/callback?token={jwt_token}"
     )
     redirect.delete_cookie("oauth_state")
+    redirect.delete_cookie("oauth_frontend_url")
     return redirect
 
 

@@ -72,7 +72,8 @@ class Settings(BaseSettings):
     # CORS Origins: Allowed origins for cross-domain requests
     CORS_ORIGINS: Any = [
         "http://localhost:3000",
-        "https://daw-proyecto-final-beta.vercel.app"
+        "https://daw-proyecto-final-beta.vercel.app",
+        "https://d4-ticket-ai.vercel.app"
     ]
 
     @field_validator("CORS_ORIGINS", mode="before")
